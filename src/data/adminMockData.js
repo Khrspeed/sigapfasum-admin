@@ -14,7 +14,7 @@ export const USERS_DB = [
     username: 'petugas1',
     password: 'ptg01kudus',
     role: 'officer',
-    label: 'Petugas 1',
+    label: 'Petugas Lapangan',
     name: 'Budi Santoso',
     unit: 'Tim Jalan & Jembatan Kudus',
     phone: '0812-3456-7801',
@@ -24,7 +24,7 @@ export const USERS_DB = [
     username: 'petugas2',
     password: 'ptg02kudus',
     role: 'officer',
-    label: 'Petugas 2',
+    label: 'Petugas Lapangan',
     name: 'Ahmad Fauzi',
     unit: 'Tim PJU & Kelistrikan Kudus',
     phone: '0812-3456-7802',
@@ -34,7 +34,7 @@ export const USERS_DB = [
     username: 'petugas3',
     password: 'ptg03kudus',
     role: 'officer',
-    label: 'Petugas 3',
+    label: 'Petugas Lapangan',
     name: 'Rina Wati',
     unit: 'Tim Drainase & Sungai Kudus',
     phone: '0812-3456-7803',
@@ -44,7 +44,7 @@ export const USERS_DB = [
     username: 'petugas4',
     password: 'ptg04kudus',
     role: 'officer',
-    label: 'Petugas 4',
+    label: 'Petugas Lapangan',
     name: 'Dimas Saputra',
     unit: 'Tim Taman & Ruang Hijau Kudus',
     phone: '0812-3456-7804',
@@ -54,14 +54,12 @@ export const USERS_DB = [
     username: 'petugas5',
     password: 'ptg05kudus',
     role: 'officer',
-    label: 'Petugas 5',
+    label: 'Petugas Lapangan',
     name: 'Eko Prasetyo',
     unit: 'Tim Halte & Trotoar Kudus',
     phone: '0812-3456-7805',
   },
 ];
-
-export const OFFICERS = USERS_DB.filter((u) => u.role === 'officer');
 
 export const INITIAL_ADMIN_REPORTS = [
   {
@@ -72,8 +70,7 @@ export const INITIAL_ADMIN_REPORTS = [
     mapUrl: 'https://www.google.com/maps?q=-6.8048,110.8405',
     description: 'Lubang sedalam 15 cm di lajur kiri membahayakan pengendara motor saat malam hari.',
     status: 'Dalam Penanganan',
-    assignedToUsername: 'petugas1',
-    assignedToName: 'Petugas 1 - Budi Santoso',
+    assignedOfficers: ['petugas1', 'petugas3'],
     reporter: 'Ahmad Maulana',
     createdAt: '2026-11-24',
     image: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=800&q=80',
@@ -86,8 +83,7 @@ export const INITIAL_ADMIN_REPORTS = [
     mapUrl: 'https://www.google.com/maps?q=-6.8095,110.8482',
     description: 'Tiga tiang lampu PJU padam sejak 3 hari lalu membuat jalanan gelap gulita.',
     status: 'Menunggu Verifikasi',
-    assignedToUsername: null,
-    assignedToName: null,
+    assignedOfficers: [],
     reporter: 'Siti Nurhaliza',
     createdAt: '2026-11-25',
     image: 'https://images.unsplash.com/photo-1542382257-80dedb725088?auto=format&fit=crop&w=800&q=80',
@@ -100,8 +96,7 @@ export const INITIAL_ADMIN_REPORTS = [
     mapUrl: 'https://www.google.com/maps?q=-6.7985,110.8420',
     description: 'Air meluap ke badan jalan setiap kali hujan deras turun lebih dari 30 menit.',
     status: 'Ditugaskan',
-    assignedToUsername: 'petugas3',
-    assignedToName: 'Petugas 3 - Rina Wati',
+    assignedOfficers: ['petugas3'],
     reporter: 'Deni Pratama',
     createdAt: '2026-11-25',
     image: 'https://images.unsplash.com/photo-1584467541268-b040f83be3fd?auto=format&fit=crop&w=800&q=80',
@@ -114,8 +109,7 @@ export const INITIAL_ADMIN_REPORTS = [
     mapUrl: 'https://www.google.com/maps?q=-6.8062,110.8418',
     description: 'Paving trotoar amblas sepanjang 3 meter dan berisiko membuat pejalan kaki tersandung.',
     status: 'Ditugaskan',
-    assignedToUsername: 'petugas5',
-    assignedToName: 'Petugas 5 - Eko Prasetyo',
+    assignedOfficers: ['petugas5'],
     reporter: 'Ayu Lestari',
     createdAt: '2026-11-26',
     image: 'https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=800&q=80',
@@ -128,10 +122,16 @@ export const INITIAL_ADMIN_REPORTS = [
     mapUrl: 'https://www.google.com/maps?q=-6.8150,110.8490',
     description: 'Dahan pohon besar patah akibat angin kencang dan menghalangi jalur pejalan kaki.',
     status: 'Laporan Selesai',
-    assignedToUsername: 'petugas4',
-    assignedToName: 'Petugas 4 - Dimas Saputra',
+    assignedOfficers: ['petugas4'],
     reporter: 'Hendra Wijaya',
     createdAt: '2026-11-22',
     image: 'https://images.unsplash.com/photo-1502082553048-f009c37129b9?auto=format&fit=crop&w=800&q=80',
   },
 ];
+
+// Helper agar data lama maupun data multi-petugas tetap terbaca konsisten
+export function getReportOfficerUsernames(report) {
+  if (Array.isArray(report.assignedOfficers)) return report.assignedOfficers;
+  if (report.assignedToUsername) return [report.assignedToUsername];
+  return [];
+}

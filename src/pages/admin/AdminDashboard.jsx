@@ -23,8 +23,16 @@ import {
   SlidersHorizontal,
   ShieldCheck,
   MapPin,
+  UserPlus,
+  Trash2,
+  Plus,
+  Check,
 } from 'lucide-react';
-import { INITIAL_ADMIN_REPORTS, OFFICERS } from '../../data/adminMockData';
+import {
+  INITIAL_ADMIN_REPORTS,
+  USERS_DB,
+  getReportOfficerUsernames,
+} from '../../data/adminMockData';
 
 const WEEKLY_CHART = [
   { day: 'Sen', total: 42, selesai: 30 },
@@ -36,13 +44,38 @@ const WEEKLY_CHART = [
   { day: 'Min', total: 48, selesai: 39 },
 ];
 
-export default function AdminDashboard({ user, reports, setReports, onLogout }) {
+export default function AdminDashboard({
+  user,
+  users,
+  setUsers,
+  reports,
+  setReports,
+  onLogout,
+}) {
   const [menu, setMenu] = useState('dashboard');
   const [statusFilter, setStatusFilter] = useState('semua');
   const [search, setSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
+
+  // Modal Penugasan Multi-Petugas pada 1 Laporan
   const [selectedReport, setSelectedReport] = useState(null);
-  const [selectedOfficerUsername, setSelectedOfficerUsername] = useState(OFFICERS[0].username);
+  const [selectedOfficerUsernames, setSelectedOfficerUsernames] = useState([]);
+
+  // Modal Tambah Petugas Baru
+  const [isAddOfficerOpen, setIsAddOfficerOpen] = useState(false);
+  const [newOfficer, setNewOfficer] = useState({
+    name: '',
+    username: '',
+    password: '',
+    unit: '',
+    phone: '',
+  });
+  const [officerFormError, setOfficerFormError] = useState('');
+
+  // Modal Tambah Banyak Tugas Bebas ke 1 Petugas
+  const [assignToOfficerTarget, setAssignToOfficerTarget] = useState(null);
+  const [selectedReportIdsForOfficer, setSelectedReportIdsForOfficer] = useState([]);
+
   const [backupNotice, setBackupNotice] = useState(null);
 
   const [controls, setControls] = useState({
@@ -54,11 +87,14 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
 
   const fileInputRef = useRef(null);
 
+  // Daftar dinamis petugas (bisa bertambah / berkurang)
+  const officers = users.filter((u) => u.role === 'officer');
+
   const topTabs = [
     { id: 'dashboard', label: 'Overview' },
     { id: 'laporan', label: 'Laporan' },
     { id: 'kelola', label: 'Kelola' },
-    { id: 'petugas', label: 'Petugas 1–5' },
+    { id: 'petugas', label: 'Petugas' },
     { id: 'backup', label: 'Backup Data' },
   ];
 
@@ -66,7 +102,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'laporan', label: 'Semua Laporan', icon: FileText },
     { id: 'kelola', label: 'Kontrol & Tugas', icon: SlidersHorizontal },
-    { id: 'petugas', label: 'Tim Petugas', icon: Users },
+    { id: 'petugas', label: 'Petugas', icon: Users },
     { id: 'backup', label: 'Backup Data', icon: Database },
   ];
 
@@ -79,38 +115,167 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
 
   const completionPercent = stats.total > 0 ? Math.round((stats.selesai / stats.total) * 100) : 0;
 
-  const handleAssign = (reportId) => {
-    const officer = OFFICERS.find((o) => o.username === selectedOfficerUsername);
-    if (!officer) return;
+  // Helper menampilkan nama semua petugas yang bertugas di suatu laporan
+  const formatAssignedNames = (report) => {
+    const usernames = getReportOfficerUsernames(report);
+    if (usernames.length === 0) return null;
+    return usernames.map((uname) => {
+      const found = officers.find((o) => o.username === uname);
+      return found ? found.name : uname;
+    });
+  };
 
+  // Buka modal kelola laporan (mendukung pilih banyak petugas sekaligus)
+  const openManageReportModal = (report) => {
+    setSelectedReport(report);
+    setSelectedOfficerUsernames(getReportOfficerUsernames(report));
+  };
+
+  const toggleOfficerSelection = (username) => {
+    setSelectedOfficerUsernames((prev) =>
+      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username]
+    );
+  };
+
+  const handleSaveMultiAssign = (reportId) => {
     setReports((prev) =>
-      prev.map((r) =>
-        r.id === reportId
-          ? {
-              ...r,
-              status: 'Ditugaskan',
-              assignedToUsername: officer.username,
-              assignedToName: `${officer.label} - ${officer.name}`,
-            }
-          : r
-      )
+      prev.map((r) => {
+        if (r.id !== reportId) return r;
+        const hasOfficers = selectedOfficerUsernames.length > 0;
+        return {
+          ...r,
+          assignedOfficers: selectedOfficerUsernames,
+          status: hasOfficers
+            ? r.status === 'Menunggu Verifikasi' || r.status === 'Ditolak'
+              ? 'Ditugaskan'
+              : r.status
+            : 'Menunggu Verifikasi',
+        };
+      })
     );
     setSelectedReport(null);
   };
 
   const handleReject = (reportId) => {
     setReports((prev) =>
-      prev.map((r) => (r.id === reportId ? { ...r, status: 'Ditolak' } : r))
+      prev.map((r) =>
+        r.id === reportId ? { ...r, status: 'Ditolak', assignedOfficers: [] } : r
+      )
     );
     setSelectedReport(null);
   };
 
+  // Tambah Petugas Baru
+  const handleAddOfficer = (e) => {
+    e.preventDefault();
+    const cleanUsername = newOfficer.username.trim().toLowerCase();
+    if (!newOfficer.name.trim() || !cleanUsername || !newOfficer.password.trim()) {
+      setOfficerFormError('Nama lengkap, username, dan password wajib diisi.');
+      return;
+    }
+    if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
+      setOfficerFormError('Username sudah dipakai. Gunakan username lain.');
+      return;
+    }
+
+    const nextNum = officers.length + 1;
+    const createdOfficer = {
+      id: `PTG-${String(Date.now()).slice(-4)}`,
+      username: cleanUsername,
+      password: newOfficer.password.trim(),
+      role: 'officer',
+      label: 'Petugas Lapangan',
+      name: newOfficer.name.trim(),
+      unit: newOfficer.unit.trim() || `Tim Lapangan Kudus #${nextNum}`,
+      phone: newOfficer.phone.trim() || '-',
+    };
+
+    setUsers((prev) => [...prev, createdOfficer]);
+    setNewOfficer({ name: '', username: '', password: '', unit: '', phone: '' });
+    setOfficerFormError('');
+    setIsAddOfficerOpen(false);
+  };
+
+  // Kurangi / Hapus Petugas
+  const handleDeleteOfficer = (officerToRemove) => {
+    if (
+      !window.confirm(
+        `Hapus petugas "${officerToRemove.name}" (@${officerToRemove.username}) dari daftar tim?`
+      )
+    ) {
+      return;
+    }
+    setUsers((prev) => prev.filter((u) => u.id !== officerToRemove.id));
+    setReports((prev) =>
+      prev.map((r) => ({
+        ...r,
+        assignedOfficers: getReportOfficerUsernames(r).filter(
+          (uname) => uname !== officerToRemove.username
+        ),
+      }))
+    );
+  };
+
+  // Buka Modal Tambah Banyak Tugas Bebas ke 1 Petugas
+  const openAssignTasksToOfficer = (officer) => {
+    setAssignToOfficerTarget(officer);
+    const currentAssignedReportIds = reports
+      .filter((r) => getReportOfficerUsernames(r).includes(officer.username))
+      .map((r) => r.id);
+    setSelectedReportIdsForOfficer(currentAssignedReportIds);
+  };
+
+  const toggleReportForOfficer = (reportId) => {
+    setSelectedReportIdsForOfficer((prev) =>
+      prev.includes(reportId) ? prev.filter((id) => id !== reportId) : [...prev, reportId]
+    );
+  };
+
+  const handleSaveOfficerTasks = () => {
+    if (!assignToOfficerTarget) return;
+    const uname = assignToOfficerTarget.username;
+
+    setReports((prev) =>
+      prev.map((r) => {
+        const currentList = getReportOfficerUsernames(r);
+        const shouldHave = selectedReportIdsForOfficer.includes(r.id);
+
+        if (shouldHave && !currentList.includes(uname)) {
+          const updatedList = [...currentList, uname];
+          return {
+            ...r,
+            assignedOfficers: updatedList,
+            status:
+              r.status === 'Menunggu Verifikasi' || r.status === 'Ditolak'
+                ? 'Ditugaskan'
+                : r.status,
+          };
+        }
+
+        if (!shouldHave && currentList.includes(uname)) {
+          const updatedList = currentList.filter((u) => u !== uname);
+          return {
+            ...r,
+            assignedOfficers: updatedList,
+          };
+        }
+
+        return r;
+      })
+    );
+
+    setAssignToOfficerTarget(null);
+  };
+
+  // Backup JSON (menyertakan data laporan + daftar petugas)
   const handleDownloadJsonBackup = () => {
     const payload = {
       app: 'SigapFasum Kabupaten Kudus',
       exportedAt: new Date().toISOString(),
       exportedBy: user.name,
       totalReports: reports.length,
+      totalOfficers: officers.length,
+      users,
       reports,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -122,10 +287,11 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
     URL.revokeObjectURL(url);
     setBackupNotice({
       type: 'success',
-      text: `Backup JSON berhasil diunduh (${reports.length} tiket laporan tersimpan).`,
+      text: `Backup JSON berhasil diunduh (${reports.length} laporan & ${officers.length} petugas tersimpan).`,
     });
   };
 
+  // Ekspor CSV Excel
   const handleExportCsv = () => {
     const headers = [
       'ID Tiket',
@@ -139,17 +305,20 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
       'Link Google Maps',
     ];
     const escapeCsv = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
-    const rows = reports.map((r) => [
-      escapeCsv(r.id),
-      escapeCsv(r.title),
-      escapeCsv(r.category),
-      escapeCsv(r.location),
-      escapeCsv(r.status),
-      escapeCsv(r.assignedToName || 'Belum ditugaskan'),
-      escapeCsv(r.reporter || '-'),
-      escapeCsv(r.createdAt || '-'),
-      escapeCsv(r.mapUrl || '-'),
-    ]);
+    const rows = reports.map((r) => {
+      const names = formatAssignedNames(r);
+      return [
+        escapeCsv(r.id),
+        escapeCsv(r.title),
+        escapeCsv(r.category),
+        escapeCsv(r.location),
+        escapeCsv(r.status),
+        escapeCsv(names ? names.join(', ') : 'Belum ditugaskan'),
+        escapeCsv(r.reporter || '-'),
+        escapeCsv(r.createdAt || '-'),
+        escapeCsv(r.mapUrl || '-'),
+      ];
+    });
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -164,6 +333,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
     });
   };
 
+  // Restore JSON
   const handleRestoreJson = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -176,6 +346,9 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
           throw new Error('Format tidak valid');
         }
         setReports(restoredList);
+        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
+          setUsers(parsed.users);
+        }
         setBackupNotice({
           type: 'success',
           text: `Data berhasil dipulihkan! Sebanyak ${restoredList.length} laporan dimuat kembali.`,
@@ -192,10 +365,12 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
     reader.readAsText(file);
   };
 
+  // Reset Data
   const handleResetDefault = () => {
-    if (!window.confirm('Kembalikan seluruh data laporan ke data awal simulasi?')) return;
+    if (!window.confirm('Kembalikan data laporan dan daftar petugas ke pengaturan awal?')) return;
     setReports(INITIAL_ADMIN_REPORTS);
-    setBackupNotice({ type: 'success', text: 'Data berhasil dikembalikan ke pengaturan awal.' });
+    setUsers(USERS_DB);
+    setBackupNotice({ type: 'success', text: 'Data laporan dan daftar petugas berhasil direset.' });
   };
 
   const filteredReports = reports.filter((r) => {
@@ -430,7 +605,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                   </div>
                 </div>
 
-                {/* Kolom Tengah: Grid 2x2 Bento dengan Kartu Utama 3D Biru */}
+                {/* Kolom Tengah: Grid 2x2 Bento */}
                 <div className="lg:col-span-4 grid grid-cols-2 gap-4">
                   <div
                     onClick={() => {
@@ -501,7 +676,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                       </div>
                     </div>
                     <div className="mt-6">
-                      <p className="text-3xl font-extrabold">{OFFICERS.length}</p>
+                      <p className="text-3xl font-extrabold">{officers.length}</p>
                       <p className="text-[11px] text-blue-600 mt-1 font-bold">Tim Lapangan Kudus</p>
                     </div>
                   </div>
@@ -560,7 +735,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                   <div>
                     <h3 className="text-base font-extrabold">Aktivitas Laporan Warga Terbaru</h3>
                     <p className={`text-xs ${mutedText}`}>
-                      Klik tombol Kelola untuk memverifikasi atau menugaskan Petugas 1–5.
+                      Klik tombol Kelola untuk memverifikasi atau menugaskan satu maupun beberapa petugas.
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -595,55 +770,68 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                       </tr>
                     </thead>
                     <tbody className={`divide-y text-xs ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
-                      {filteredReports.slice(0, 5).map((item) => (
-                        <tr key={item.id} className="hover:bg-blue-600/5 transition">
-                          <td className="py-3.5 px-2 font-extrabold text-blue-600">{item.id}</td>
-                          <td className="py-3.5 px-2">
-                            <div className="flex items-center gap-3">
-                              <img
-                                src={item.image}
-                                alt={item.title}
-                                className="w-10 h-10 rounded-xl object-cover shrink-0"
-                              />
-                              <div>
-                                <p className="font-bold">{item.title}</p>
-                                <div className={`flex items-center gap-2 text-[11px] ${mutedText}`}>
-                                  <span>{item.location}</span>
-                                  {item.mapUrl && (
-                                    <a
-                                      href={item.mapUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 font-bold hover:underline inline-flex items-center gap-0.5"
-                                    >
-                                      Maps <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                  )}
+                      {filteredReports.slice(0, 5).map((item) => {
+                        const assignedNames = formatAssignedNames(item);
+                        return (
+                          <tr key={item.id} className="hover:bg-blue-600/5 transition">
+                            <td className="py-3.5 px-2 font-extrabold text-blue-600">{item.id}</td>
+                            <td className="py-3.5 px-2">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={item.image}
+                                  alt={item.title}
+                                  className="w-10 h-10 rounded-xl object-cover shrink-0"
+                                />
+                                <div>
+                                  <p className="font-bold">{item.title}</p>
+                                  <div className={`flex items-center gap-2 text-[11px] ${mutedText}`}>
+                                    <span>{item.location}</span>
+                                    {item.mapUrl && (
+                                      <a
+                                        href={item.mapUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 font-bold hover:underline inline-flex items-center gap-0.5"
+                                      >
+                                        Maps <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-2 font-semibold">
-                            {item.assignedToName || <span className={`italic ${mutedText}`}>Belum ditugaskan</span>}
-                          </td>
-                          <td className="py-3.5 px-2">
-                            <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
-                              {item.status}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-2 text-right">
-                            <button
-                              onClick={() => {
-                                setSelectedReport(item);
-                                setSelectedOfficerUsername(item.assignedToUsername || OFFICERS[0].username);
-                              }}
-                              className="px-3.5 py-1.5 rounded-full bg-[#0f172a] hover:bg-blue-600 text-white font-bold transition cursor-pointer"
-                            >
-                              Kelola
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="py-3.5 px-2">
+                              {assignedNames ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {assignedNames.map((n, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-500/10"
+                                    >
+                                      {n}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className={`italic ${mutedText}`}>Belum ditugaskan</span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-2">
+                              <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
+                                {item.status}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-2 text-right">
+                              <button
+                                onClick={() => openManageReportModal(item)}
+                                className="px-3.5 py-1.5 rounded-full bg-[#0f172a] hover:bg-blue-600 text-white font-bold transition cursor-pointer"
+                              >
+                                Kelola
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -701,47 +889,60 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                     </tr>
                   </thead>
                   <tbody className={`divide-y text-xs ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
-                    {filteredReports.map((item) => (
-                      <tr key={item.id} className="hover:bg-blue-600/5">
-                        <td className="py-3.5 px-2 font-extrabold text-blue-600">{item.id}</td>
-                        <td className="py-3.5 px-2">
-                          <p className="font-bold">{item.title}</p>
-                          <div className={`flex items-center gap-2 text-[11px] ${mutedText}`}>
-                            <span>{item.location}</span>
-                            {item.mapUrl && (
-                              <a
-                                href={item.mapUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 font-bold hover:underline inline-flex items-center gap-0.5"
-                              >
-                                Maps <ExternalLink className="w-3 h-3" />
-                              </a>
+                    {filteredReports.map((item) => {
+                      const assignedNames = formatAssignedNames(item);
+                      return (
+                        <tr key={item.id} className="hover:bg-blue-600/5">
+                          <td className="py-3.5 px-2 font-extrabold text-blue-600">{item.id}</td>
+                          <td className="py-3.5 px-2">
+                            <p className="font-bold">{item.title}</p>
+                            <div className={`flex items-center gap-2 text-[11px] ${mutedText}`}>
+                              <span>{item.location}</span>
+                              {item.mapUrl && (
+                                <a
+                                  href={item.mapUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 font-bold hover:underline inline-flex items-center gap-0.5"
+                                >
+                                  Maps <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </div>
+                          </td>
+                          <td className={`py-3.5 px-2 ${mutedText}`}>{item.reporter || 'Warga Kudus'}</td>
+                          <td className="py-3.5 px-2">
+                            {assignedNames ? (
+                              <div className="flex flex-wrap gap-1">
+                                {assignedNames.map((n, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-500/10"
+                                  >
+                                    {n}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className={`italic ${mutedText}`}>Belum ditugaskan</span>
                             )}
-                          </div>
-                        </td>
-                        <td className={`py-3.5 px-2 ${mutedText}`}>{item.reporter || 'Warga Kudus'}</td>
-                        <td className="py-3.5 px-2 font-semibold">
-                          {item.assignedToName || <span className={`italic ${mutedText}`}>Belum ditugaskan</span>}
-                        </td>
-                        <td className="py-3.5 px-2">
-                          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
-                            {item.status}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-2 text-right">
-                          <button
-                            onClick={() => {
-                              setSelectedReport(item);
-                              setSelectedOfficerUsername(item.assignedToUsername || OFFICERS[0].username);
-                            }}
-                            className="px-3.5 py-1.5 rounded-full bg-[#0f172a] hover:bg-blue-600 text-white font-bold transition cursor-pointer"
-                          >
-                            Kelola
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="py-3.5 px-2">
+                            <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-2 text-right">
+                            <button
+                              onClick={() => openManageReportModal(item)}
+                              className="px-3.5 py-1.5 rounded-full bg-[#0f172a] hover:bg-blue-600 text-white font-bold transition cursor-pointer"
+                            >
+                              Kelola
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -778,7 +979,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-white/50">Tim Aktif</p>
-                      <p className="font-bold text-blue-400">5 Petugas</p>
+                      <p className="font-bold text-blue-400">{officers.length} Petugas</p>
                     </div>
                   </div>
                 </div>
@@ -795,8 +996,8 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                     },
                     {
                       key: 'autoNotifOfficer',
-                      title: 'Distribusi Tugas Petugas 1–5',
-                      desc: 'Aktifkan penugasan langsung ke akun masing-masing petugas lapangan.',
+                      title: 'Distribusi Tugas Multi-Petugas',
+                      desc: 'Memungkinkan satu laporan ditangani lebih dari satu petugas secara bersamaan.',
                     },
                     {
                       key: 'antiSpamFilter',
@@ -840,7 +1041,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
             </div>
           )}
 
-          {/* VIEW 4: PETUGAS 1-5 */}
+          {/* VIEW 4: KELOLA PETUGAS (TAMBAH, HAPUS & ATUR BANYAK TUGAS) */}
           {menu === 'petugas' && (
             <div className="space-y-5">
               <div className="bento-blue-3d rounded-[28px] p-6 sm:p-8 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative overflow-hidden">
@@ -848,46 +1049,121 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                   <span className="px-3 py-1 rounded-full bg-white/20 text-[11px] font-bold">
                     Tim Lapangan Kabupaten Kudus
                   </span>
-                  <h2 className="text-3xl font-extrabold pt-1">{OFFICERS.length} Petugas Aktif</h2>
+                  <h2 className="text-3xl font-extrabold pt-1">{officers.length} Petugas Aktif</h2>
                   <p className="text-xs text-blue-100 max-w-md">
-                    Setiap petugas memiliki username dan password terpisah untuk memperbarui status pengerjaan di lapangan.
+                    Tambah atau kurangi anggota petugas secara bebas, serta berikan beberapa tugas sekaligus sesuai kebutuhan lapangan.
                   </p>
                 </div>
-                <button
-                  onClick={() => setMenu('laporan')}
-                  className="px-5 py-3 rounded-full bg-[#0f172a] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-lg self-start sm:self-center cursor-pointer"
-                >
-                  Tugaskan Laporan <ArrowUpRight className="w-4 h-4" />
-                </button>
+                <div className="flex flex-wrap gap-2.5 self-start sm:self-center relative">
+                  <button
+                    onClick={() => {
+                      setOfficerFormError('');
+                      setIsAddOfficerOpen(true);
+                    }}
+                    className="px-5 py-3 rounded-full bg-white text-blue-700 hover:bg-blue-50 text-xs font-extrabold inline-flex items-center gap-1.5 shadow-lg transition cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" /> Tambah Petugas
+                  </button>
+                  <button
+                    onClick={() => setMenu('laporan')}
+                    className="px-5 py-3 rounded-full bg-[#0f172a] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-lg cursor-pointer"
+                  >
+                    Kelola Laporan <ArrowUpRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {OFFICERS.map((off) => {
-                  const taskCount = reports.filter(
-                    (r) => r.assignedToUsername === off.username && r.status !== 'Laporan Selesai'
-                  ).length;
-                  return (
-                    <div key={off.id} className={`rounded-[24px] border p-5 space-y-3 ${cardBg}`}>
-                      <div className="flex items-center justify-between">
-                        <span className="px-3 py-1 rounded-full bg-blue-600/10 text-blue-600 text-[11px] font-extrabold">
-                          {off.label}
-                        </span>
-                        <span className={`text-[11px] font-bold ${mutedText}`}>
-                          {taskCount} Tugas Aktif
-                        </span>
+              {officers.length === 0 ? (
+                <div className={`rounded-[28px] border p-8 text-center text-xs ${cardBg} ${mutedText}`}>
+                  Belum ada petugas terdaftar. Klik tombol <strong>Tambah Petugas</strong> di atas untuk menambahkan anggota baru.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {officers.map((off) => {
+                    const officerReports = reports.filter((r) =>
+                      getReportOfficerUsernames(r).includes(off.username)
+                    );
+                    const activeCount = officerReports.filter(
+                      (r) => r.status !== 'Laporan Selesai'
+                    ).length;
+
+                    return (
+                      <div
+                        key={off.id}
+                        className={`rounded-[24px] border p-5 flex flex-col justify-between gap-4 ${cardBg}`}
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="px-3 py-1 rounded-full bg-blue-600/10 text-blue-600 text-[11px] font-extrabold">
+                              Petugas
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[11px] font-bold ${mutedText}`}>
+                                {activeCount} Aktif • {officerReports.length} Total
+                              </span>
+                              <button
+                                onClick={() => handleDeleteOfficer(off)}
+                                title="Hapus Petugas"
+                                className="p-1.5 rounded-full text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <h3 className="text-base font-extrabold">{off.name}</h3>
+                            <p className={`text-xs mt-0.5 ${mutedText}`}>{off.unit}</p>
+                          </div>
+
+                          {/* Daftar Tugas yang Dipegang Petugas Ini */}
+                          <div className={`p-3 rounded-2xl border space-y-1.5 ${subCardBg}`}>
+                            <p className="text-[11px] font-extrabold text-blue-600">
+                              Daftar Tugas ({officerReports.length}):
+                            </p>
+                            {officerReports.length === 0 ? (
+                              <p className={`text-[11px] italic ${mutedText}`}>Belum ada tugas</p>
+                            ) : (
+                              <ul className="space-y-1 text-[11px]">
+                                {officerReports.map((rep) => (
+                                  <li
+                                    key={rep.id}
+                                    className="flex items-center justify-between gap-2 truncate"
+                                  >
+                                    <span className="truncate font-semibold">
+                                      • {rep.id}: {rep.title}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2.5">
+                          <button
+                            onClick={() => openAssignTasksToOfficer(off)}
+                            className="w-full py-2.5 rounded-full bg-[#0f172a] hover:bg-blue-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Atur / Tambah Tugas
+                          </button>
+
+                          <div
+                            className={`pt-2 border-t text-[11px] font-mono flex justify-between ${
+                              darkMode
+                                ? 'border-slate-800 text-slate-400'
+                                : 'border-slate-100 text-slate-500'
+                            }`}
+                          >
+                            <span>user: {off.username}</span>
+                            <span>pass: {off.password}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="text-base font-extrabold">{off.name}</h3>
-                        <p className={`text-xs mt-0.5 ${mutedText}`}>{off.unit}</p>
-                      </div>
-                      <div className={`pt-2 border-t text-[11px] font-mono flex justify-between ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-                        <span>user: {off.username}</span>
-                        <span>{off.phone}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -914,7 +1190,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                     </div>
                     <h3 className="text-base font-extrabold pt-1">Unduh Cadangan Penuh (.JSON)</h3>
                     <p className={`text-xs leading-relaxed ${mutedText}`}>
-                      Simpan seluruh database laporan ({reports.length} tiket), koordinat GPS, dan penugasan petugas ke satu file cadangan.
+                      Simpan seluruh database laporan ({reports.length} tiket) dan data akun ({officers.length} petugas) ke satu file cadangan.
                     </p>
                   </div>
                   <button
@@ -977,7 +1253,7 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                     </div>
                     <h3 className="text-base font-extrabold pt-1">Reset ke Data Awal Simulasi</h3>
                     <p className={`text-xs leading-relaxed ${mutedText}`}>
-                      Kembalikan daftar laporan Kabupaten Kudus ke 5 data contoh bawaan sistem.
+                      Kembalikan daftar laporan Kabupaten Kudus dan daftar petugas ke pengaturan bawaan sistem.
                     </p>
                   </div>
                   <button
@@ -991,10 +1267,10 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
             </div>
           )}
 
-          {/* MODAL PENUGASAN PETUGAS 1–5 */}
+          {/* MODAL 1: PENUGASAN BEBAS MULTI-PETUGAS PADA 1 LAPORAN */}
           {selectedReport && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-              <div className={`rounded-[28px] border max-w-md w-full p-6 space-y-4 shadow-2xl ${cardBg}`}>
+              <div className={`rounded-[28px] border max-w-lg w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto ${cardBg}`}>
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-extrabold text-blue-600">{selectedReport.id}</span>
                   <button
@@ -1007,26 +1283,65 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                 <img
                   src={selectedReport.image}
                   alt={selectedReport.title}
-                  className="w-full h-40 object-cover rounded-2xl"
+                  className="w-full h-36 object-cover rounded-2xl"
                 />
-                <h3 className="text-base font-extrabold">{selectedReport.title}</h3>
-                <p className={`text-xs ${mutedText}`}>{selectedReport.description}</p>
+                <div>
+                  <h3 className="text-base font-extrabold">{selectedReport.title}</h3>
+                  <p className={`text-xs mt-1 ${mutedText}`}>{selectedReport.description}</p>
+                </div>
 
-                <div className="pt-1">
-                  <label className="block text-xs font-bold mb-1.5">
-                    Pilih Petugas Lapangan (Petugas 1 – 5):
-                  </label>
-                  <select
-                    value={selectedOfficerUsername}
-                    onChange={(e) => setSelectedOfficerUsername(e.target.value)}
-                    className={`w-full px-4 py-2.5 rounded-2xl border text-xs font-bold ${subCardBg}`}
-                  >
-                    {OFFICERS.map((off) => (
-                      <option key={off.id} value={off.username}>
-                        {off.label} — {off.name} ({off.unit})
-                      </option>
-                    ))}
-                  </select>
+                <div className="pt-1 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold">
+                      Pilih Petugas (Bisa pilih 1 atau lebih):
+                    </label>
+                    <div className="flex gap-2 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOfficerUsernames(officers.map((o) => o.username))}
+                        className="text-blue-600 hover:underline cursor-pointer"
+                      >
+                        Pilih Semua
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOfficerUsernames([])}
+                        className={`${mutedText} hover:underline cursor-pointer`}
+                      >
+                        Kosongkan
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                    {officers.map((off) => {
+                      const checked = selectedOfficerUsernames.includes(off.username);
+                      return (
+                        <button
+                          key={off.id}
+                          type="button"
+                          onClick={() => toggleOfficerSelection(off.username)}
+                          className={`p-3 rounded-2xl border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                            checked
+                              ? 'border-blue-600 bg-blue-600/10 text-blue-600'
+                              : `${subCardBg} ${mutedText}`
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-extrabold truncate">{off.name}</p>
+                            <p className="text-[10px] truncate opacity-80">{off.unit}</p>
+                          </div>
+                          <div
+                            className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                              checked ? 'bg-blue-600 text-white' : 'border border-slate-300'
+                            }`}
+                          >
+                            {checked && <Check className="w-3 h-3" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2.5 pt-2">
@@ -1034,15 +1349,168 @@ export default function AdminDashboard({ user, reports, setReports, onLogout }) 
                     onClick={() => handleReject(selectedReport.id)}
                     className="py-2.5 rounded-full bg-red-500/10 text-red-500 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-red-500/20 cursor-pointer"
                   >
-                    <XCircle className="w-4 h-4" /> Tolak
+                    <XCircle className="w-4 h-4" /> Tolak Laporan
                   </button>
                   <button
-                    onClick={() => handleAssign(selectedReport.id)}
+                    onClick={() => handleSaveMultiAssign(selectedReport.id)}
                     className="py-2.5 rounded-full bento-blue-3d text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <UserCheck className="w-4 h-4" /> Tugaskan
+                    <UserCheck className="w-4 h-4" /> Simpan ({selectedOfficerUsernames.length} Petugas)
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL 2: TAMBAH PETUGAS BARU */}
+          {isAddOfficerOpen && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+              <div className={`rounded-[28px] border max-w-md w-full p-6 space-y-4 shadow-2xl ${cardBg}`}>
+                <div className="flex justify-between items-center">
+                  <h3 className="text-base font-extrabold">Tambah Petugas Lapangan</h3>
+                  <button
+                    onClick={() => setIsAddOfficerOpen(false)}
+                    className={`text-xs font-bold hover:text-blue-600 cursor-pointer ${mutedText}`}
+                  >
+                    Tutup
+                  </button>
+                </div>
+
+                {officerFormError && (
+                  <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-xs font-bold text-red-500">
+                    {officerFormError}
+                  </div>
+                )}
+
+                <form onSubmit={handleAddOfficer} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Nama Lengkap Petugas</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: Hendra Kusuma"
+                      value={newOfficer.name}
+                      onChange={(e) => setNewOfficer({ ...newOfficer, name: e.target.value })}
+                      className={`w-full px-4 py-2.5 rounded-2xl border text-xs ${subCardBg}`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Username Login</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Contoh: petugas6"
+                        value={newOfficer.username}
+                        onChange={(e) => setNewOfficer({ ...newOfficer, username: e.target.value })}
+                        className={`w-full px-4 py-2.5 rounded-2xl border text-xs ${subCardBg}`}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Password Login</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Contoh: ptg06kudus"
+                        value={newOfficer.password}
+                        onChange={(e) => setNewOfficer({ ...newOfficer, password: e.target.value })}
+                        className={`w-full px-4 py-2.5 rounded-2xl border text-xs ${subCardBg}`}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Unit / Bidang Tugas</label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: Tim Jalan & Drainase Kudus"
+                      value={newOfficer.unit}
+                      onChange={(e) => setNewOfficer({ ...newOfficer, unit: e.target.value })}
+                      className={`w-full px-4 py-2.5 rounded-2xl border text-xs ${subCardBg}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">No. Telepon / WhatsApp</label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: 0812-3456-7890"
+                      value={newOfficer.phone}
+                      onChange={(e) => setNewOfficer({ ...newOfficer, phone: e.target.value })}
+                      className={`w-full px-4 py-2.5 rounded-2xl border text-xs ${subCardBg}`}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 rounded-full bento-blue-3d text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer mt-2"
+                  >
+                    <UserPlus className="w-4 h-4" /> Simpan Petugas Baru
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL 3: ATUR BANYAK TUGAS BEBAS UNTUK 1 PETUGAS */}
+          {assignToOfficerTarget && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+              <div className={`rounded-[28px] border max-w-lg w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto ${cardBg}`}>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="text-[11px] font-extrabold text-blue-600">Atur Tugas Bebas</span>
+                    <h3 className="text-base font-extrabold">{assignToOfficerTarget.name}</h3>
+                  </div>
+                  <button
+                    onClick={() => setAssignToOfficerTarget(null)}
+                    className={`text-xs font-bold hover:text-blue-600 cursor-pointer ${mutedText}`}
+                  >
+                    Tutup
+                  </button>
+                </div>
+
+                <p className={`text-xs ${mutedText}`}>
+                  Centang laporan mana saja yang ingin dikerjakan oleh <strong>{assignToOfficerTarget.name}</strong> (bisa memilih lebih dari satu tugas):
+                </p>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {reports.map((rep) => {
+                    const checked = selectedReportIdsForOfficer.includes(rep.id);
+                    return (
+                      <button
+                        key={rep.id}
+                        type="button"
+                        onClick={() => toggleReportForOfficer(rep.id)}
+                        className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between gap-3 transition cursor-pointer ${
+                          checked
+                            ? 'border-blue-600 bg-blue-600/10'
+                            : `${subCardBg}`
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-extrabold text-blue-600">{rep.id}</span>
+                            <span className={`text-[10px] font-bold ${mutedText}`}>• {rep.status}</span>
+                          </div>
+                          <p className="text-xs font-bold truncate mt-0.5">{rep.title}</p>
+                          <p className={`text-[11px] truncate ${mutedText}`}>{rep.location}</p>
+                        </div>
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                            checked ? 'bg-blue-600 text-white' : 'border border-slate-300'
+                          }`}
+                        >
+                          {checked && <Check className="w-3 h-3" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={handleSaveOfficerTasks}
+                  className="w-full py-3 rounded-full bento-blue-3d text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Simpan Daftar Tugas ({selectedReportIdsForOfficer.length} Laporan)
+                </button>
               </div>
             </div>
           )}

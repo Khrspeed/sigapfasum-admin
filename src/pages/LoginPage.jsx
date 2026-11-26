@@ -12,9 +12,8 @@ import {
   Sun,
   Wrench,
 } from 'lucide-react';
-import { USERS_DB } from '../data/adminMockData';
 
-export default function LoginPage({ onLogin }) {
+export default function LoginPage({ users = [], onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -24,7 +23,7 @@ export default function LoginPage({ onLogin }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const matchedUser = USERS_DB.find(
+    const matchedUser = users.find(
       (u) => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password
     );
 
@@ -74,7 +73,7 @@ export default function LoginPage({ onLogin }) {
 
       {/* Center 3D Bento Grid Login */}
       <main className="max-w-5xl w-full mx-auto my-auto py-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        {/* Kartu Kiri: Showcase 3D Bento Biru */}
+        {/* Kartu Kiri */}
         <div className="lg:col-span-5 flex flex-col gap-5">
           <div className="bento-blue-3d rounded-[32px] p-7 text-white flex-1 flex flex-col justify-between relative overflow-hidden">
             <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-white/15 blur-xl" />
@@ -88,7 +87,7 @@ export default function LoginPage({ onLogin }) {
                 Kendali Cepat Fasilitas Umum Kudus
               </h2>
               <p className="text-xs text-blue-100 leading-relaxed">
-                Akses terpisah untuk Admin Dinas dan Petugas Lapangan (Petugas 1–5) guna memverifikasi dan menindaklanjuti laporan warga.
+                Akses terpisah untuk Admin Dinas dan Petugas Lapangan guna memverifikasi dan menindaklanjuti laporan warga.
               </p>
             </div>
 
@@ -100,7 +99,7 @@ export default function LoginPage({ onLogin }) {
               <div className="rounded-2xl bg-white/15 backdrop-blur-xs p-3.5 border border-white/15">
                 <p className="text-[11px] text-blue-100">Tim Lapangan</p>
                 <p className="text-sm font-extrabold mt-0.5 flex items-center gap-1">
-                  <Wrench className="w-3.5 h-3.5" /> Petugas 1 – 5
+                  <Wrench className="w-3.5 h-3.5" /> Petugas
                 </p>
               </div>
             </div>
@@ -125,7 +124,7 @@ export default function LoginPage({ onLogin }) {
           </div>
         </div>
 
-        {/* Kartu Kanan: Form Login 3D Bento */}
+        {/* Kartu Kanan: Form Login */}
         <div
           className={`lg:col-span-7 rounded-[32px] border p-7 sm:p-9 flex flex-col justify-between space-y-6 ${
             darkMode
@@ -138,7 +137,7 @@ export default function LoginPage({ onLogin }) {
               Masuk Portal Internal
             </h1>
             <p className={`text-xs sm:text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-              Gunakan akun Admin atau akun Petugas 1 sampai Petugas 5 untuk melanjutkan.
+              Gunakan akun Admin atau akun Petugas Lapangan untuk melanjutkan.
             </p>
           </div>
 
@@ -202,7 +201,7 @@ export default function LoginPage({ onLogin }) {
             </button>
           </form>
 
-          {/* Daftar Akun Demo Interaktif */}
+          {/* Daftar Akun Aktif */}
           <div className={`pt-4 border-t ${darkMode ? 'border-slate-800' : 'border-slate-100'}`}>
             <button
               type="button"
@@ -210,7 +209,7 @@ export default function LoginPage({ onLogin }) {
               className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-blue-600 hover:underline cursor-pointer"
             >
               <KeyRound className="w-3.5 h-3.5" />
-              {showAccounts ? 'Sembunyikan Daftar Akun' : 'Lihat Daftar Akun (Admin & Petugas 1–5)'}
+              {showAccounts ? 'Sembunyikan Daftar Akun' : 'Lihat Daftar Akun (Admin & Petugas)'}
             </button>
 
             {showAccounts && (
@@ -219,7 +218,7 @@ export default function LoginPage({ onLogin }) {
                   darkMode ? 'bg-[#1c2536] border-slate-700' : 'bg-slate-50 border-slate-200/80'
                 }`}
               >
-                {USERS_DB.map((acc) => (
+                {users.map((acc) => (
                   <div
                     key={acc.id}
                     onClick={() => {
@@ -229,8 +228,10 @@ export default function LoginPage({ onLogin }) {
                     className="flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-blue-600/10 cursor-pointer transition"
                     title="Klik untuk isi otomatis"
                   >
-                    <span className="font-extrabold">{acc.label}</span>
-                    <span className="font-mono text-blue-600 font-bold">
+                    <span className="font-extrabold truncate pr-2">
+                      {acc.role === 'admin' ? 'Admin' : acc.name}
+                    </span>
+                    <span className="font-mono text-blue-600 font-bold shrink-0">
                       {acc.username} / {acc.password}
                     </span>
                   </div>

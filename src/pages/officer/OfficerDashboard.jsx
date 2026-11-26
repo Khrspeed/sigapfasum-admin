@@ -15,7 +15,9 @@ import {
   ShieldCheck,
   Play,
   Phone,
+  Users,
 } from 'lucide-react';
+import { getReportOfficerUsernames } from '../../data/adminMockData';
 
 const OFFICER_WEEKLY_STATS = [
   { day: 'Sen', selesai: 65 },
@@ -27,7 +29,7 @@ const OFFICER_WEEKLY_STATS = [
   { day: 'Min', selesai: 60 },
 ];
 
-export default function OfficerDashboard({ user, reports, setReports, onLogout }) {
+export default function OfficerDashboard({ user, users = [], reports, setReports, onLogout }) {
   const [menu, setMenu] = useState('dashboard');
   const [darkMode, setDarkMode] = useState(false);
 
@@ -45,16 +47,31 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
     { id: 'profil', label: 'Profil', icon: User },
   ];
 
-  const myTasks = reports.filter((r) => r.assignedToUsername === user.username);
+  // Semua tugas yang ditugaskan ke petugas ini (bisa banyak tugas sekaligus)
+  const myTasks = reports.filter((r) =>
+    getReportOfficerUsernames(r).includes(user.username)
+  );
   const activeTasks = myTasks.filter((r) => r.status !== 'Laporan Selesai');
   const pendingTasks = myTasks.filter((r) => r.status === 'Ditugaskan');
   const inProgressTasks = myTasks.filter((r) => r.status === 'Dalam Penanganan');
   const doneTasks = myTasks.filter((r) => r.status === 'Laporan Selesai');
 
-  const completionPercent = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 100;
+  const completionPercent =
+    myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 100;
 
   const updateTaskStatus = (id, status) => {
     setReports((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+  };
+
+  // Menampilkan rekan petugas lain jika 1 laporan ditangani bersama-sama
+  const getCoWorkers = (report) => {
+    const allAssigned = getReportOfficerUsernames(report).filter(
+      (uname) => uname !== user.username
+    );
+    return allAssigned.map((uname) => {
+      const found = users.find((u) => u.username === uname);
+      return found ? found.name : uname;
+    });
   };
 
   const pageBg = darkMode ? 'bg-[#0b0f17] text-slate-100' : 'bg-[#f4f7fb] text-slate-900';
@@ -142,7 +159,7 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
               </div>
               <div className="hidden sm:block text-left leading-tight">
                 <p className="text-xs font-extrabold">{user.name}</p>
-                <p className="text-[10px] font-bold text-blue-600">{user.label}</p>
+                <p className="text-[10px] font-bold text-blue-600">Petugas</p>
               </div>
               <button
                 onClick={onLogout}
@@ -203,7 +220,7 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
               <p className={`text-xs sm:text-sm mt-1 ${mutedText}`}>{user.unit}</p>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-blue-600/10 text-blue-600 self-start sm:self-auto">
-              <ShieldCheck className="w-3.5 h-3.5" /> {user.label} ({user.id})
+              <ShieldCheck className="w-3.5 h-3.5" /> Petugas Lapangan ({user.id})
             </span>
           </div>
 
@@ -218,7 +235,7 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
                       <div className="flex items-center justify-between">
                         <span className={`text-xs font-bold ${mutedText}`}>Total Tugas Lapangan</span>
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
-                          {user.label}
+                          Petugas
                         </span>
                       </div>
                       <div className="flex items-baseline gap-2.5 mt-3">
@@ -262,7 +279,7 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
                   </div>
                 </div>
 
-                {/* Kolom Tengah: Grid 2x2 Bento dengan Kartu Utama 3D Biru */}
+                {/* Kolom Tengah: Grid 2x2 Bento */}
                 <div className="lg:col-span-4 grid grid-cols-2 gap-4">
                   <div
                     onClick={() => setMenu('tugas')}
@@ -363,11 +380,11 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
             </div>
           )}
 
-          {/* LIST TUGAS AKTIF (Tampil di Overview & Tab Tugas Saya) */}
+          {/* LIST TUGAS AKTIF */}
           {(menu === 'dashboard' || menu === 'tugas') && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-extrabold">Daftar Tugas Lapangan ({user.label})</h2>
+                <h2 className="text-base font-extrabold">Daftar Tugas Lapangan ({user.name})</h2>
                 <span className={`text-xs font-bold ${mutedText}`}>
                   {activeTasks.length} tugas perlu ditangani
                 </span>
@@ -379,63 +396,73 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {activeTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className={`rounded-[28px] border p-5 flex flex-col justify-between gap-4 ${cardBg}`}
-                    >
-                      <div>
-                        <img
-                          src={task.image}
-                          alt={task.title}
-                          className="w-full h-40 object-cover rounded-2xl mb-3.5"
-                        />
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-extrabold text-blue-600">{task.id}</span>
-                          <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
-                            {task.status}
-                          </span>
-                        </div>
-                        <h3 className="text-base font-extrabold mt-2">{task.title}</h3>
-                        <p className={`text-xs mt-1 line-clamp-2 ${mutedText}`}>{task.description}</p>
+                  {activeTasks.map((task) => {
+                    const coWorkers = getCoWorkers(task);
+                    return (
+                      <div
+                        key={task.id}
+                        className={`rounded-[28px] border p-5 flex flex-col justify-between gap-4 ${cardBg}`}
+                      >
+                        <div>
+                          <img
+                            src={task.image}
+                            alt={task.title}
+                            className="w-full h-40 object-cover rounded-2xl mb-3.5"
+                          />
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-extrabold text-blue-600">{task.id}</span>
+                            <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
+                              {task.status}
+                            </span>
+                          </div>
+                          <h3 className="text-base font-extrabold mt-2">{task.title}</h3>
+                          <p className={`text-xs mt-1 line-clamp-2 ${mutedText}`}>{task.description}</p>
 
-                        <div className="mt-3 pt-2.5 border-t border-slate-200/50 dark:border-slate-800 space-y-1.5">
-                          <p className={`text-xs flex items-center gap-1.5 ${mutedText}`}>
-                            <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                            <span className="truncate">{task.location}</span>
-                          </p>
-                          {task.mapUrl && (
-                            <a
-                              href={task.mapUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
+                          {coWorkers.length > 0 && (
+                            <div className="mt-2.5 px-3 py-1.5 rounded-xl bg-blue-600/10 text-blue-600 text-[11px] font-bold flex items-center gap-1.5">
+                              <Users className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">Tim bersama: {coWorkers.join(', ')}</span>
+                            </div>
+                          )}
+
+                          <div className="mt-3 pt-2.5 border-t border-slate-200/50 dark:border-slate-800 space-y-1.5">
+                            <p className={`text-xs flex items-center gap-1.5 ${mutedText}`}>
+                              <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                              <span className="truncate">{task.location}</span>
+                            </p>
+                            {task.mapUrl && (
+                              <a
+                                href={task.mapUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
+                              >
+                                Buka Titik Google Maps <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          {task.status === 'Ditugaskan' ? (
+                            <button
+                              onClick={() => updateTaskStatus(task.id, 'Dalam Penanganan')}
+                              className="w-full py-3 rounded-full bento-blue-3d text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
                             >
-                              Buka Titik Google Maps <ExternalLink className="w-3.5 h-3.5" />
-                            </a>
+                              <Play className="w-3.5 h-3.5" /> Mulai Kerjakan
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => updateTaskStatus(task.id, 'Laporan Selesai')}
+                              className="w-full py-3 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Tandai Selesai
+                            </button>
                           )}
                         </div>
                       </div>
-
-                      <div>
-                        {task.status === 'Ditugaskan' ? (
-                          <button
-                            onClick={() => updateTaskStatus(task.id, 'Dalam Penanganan')}
-                            className="w-full py-3 rounded-full bento-blue-3d text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                          >
-                            <Play className="w-3.5 h-3.5" /> Mulai Kerjakan
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => updateTaskStatus(task.id, 'Laporan Selesai')}
-                            className="w-full py-3 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-4 h-4" /> Tandai Selesai
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -444,7 +471,7 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
           {/* VIEW 3: RIWAYAT TUGAS SELESAI */}
           {menu === 'selesai' && (
             <div className="space-y-4">
-              <h2 className="text-lg font-extrabold">Riwayat Tugas Selesai ({user.label})</h2>
+              <h2 className="text-lg font-extrabold">Riwayat Tugas Selesai ({user.name})</h2>
               {doneTasks.length === 0 ? (
                 <div className={`rounded-[28px] border p-8 text-center text-xs ${cardBg} ${mutedText}`}>
                   Belum ada riwayat tugas yang diselesaikan.
@@ -469,7 +496,7 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
             </div>
           )}
 
-          {/* VIEW 4: PROFIL PETUGAS (KARTU 3D ID CARD) */}
+          {/* VIEW 4: PROFIL PETUGAS */}
           {menu === 'profil' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               <div className="lg:col-span-5">
@@ -493,8 +520,8 @@ export default function OfficerDashboard({ user, reports, setReports, onLogout }
                       <p className="font-bold">{user.name}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] text-white/50">Jabatan</p>
-                      <p className="font-bold text-blue-400">{user.label}</p>
+                      <p className="text-[10px] text-white/50">Peran</p>
+                      <p className="font-bold text-blue-400">Petugas</p>
                     </div>
                   </div>
                 </div>
