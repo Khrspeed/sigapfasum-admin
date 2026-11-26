@@ -61,6 +61,71 @@ export const USERS_DB = [
   },
 ];
 
+export const PRIORITY_LEVELS = [
+  {
+    id: 'Tinggi',
+    label: 'Tinggi',
+    desc: 'Darurat / membahayakan warga',
+    weight: 3,
+    badgeClass: 'bg-red-500/15 text-red-600 border-red-500/30',
+    activeBtnClass: 'bg-red-600 text-white border-red-600 shadow-md',
+    dotClass: 'bg-red-500',
+  },
+  {
+    id: 'Sedang',
+    label: 'Sedang',
+    desc: 'Perlu penanganan terjadwal',
+    weight: 2,
+    badgeClass: 'bg-amber-500/15 text-amber-600 border-amber-500/30',
+    activeBtnClass: 'bg-amber-500 text-white border-amber-500 shadow-md',
+    dotClass: 'bg-amber-500',
+  },
+  {
+    id: 'Rendah',
+    label: 'Rendah',
+    desc: 'Kerusakan ringan / estetika',
+    weight: 1,
+    badgeClass: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30',
+    activeBtnClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md',
+    dotClass: 'bg-emerald-500',
+  },
+];
+
+export function getReportPriority(report) {
+  if (report?.priority && ['Tinggi', 'Sedang', 'Rendah'].includes(report.priority)) {
+    return report.priority;
+  }
+  const text = `${report?.category || ''} ${report?.title || ''}`.toLowerCase();
+  if (
+    text.includes('tumbang') ||
+    text.includes('amblas') ||
+    text.includes('berlubang') ||
+    text.includes('listrik') ||
+    text.includes('banjir')
+  ) {
+    return 'Tinggi';
+  }
+  if (text.includes('pju') || text.includes('lampu') || text.includes('drainase')) {
+    return 'Sedang';
+  }
+  return 'Rendah';
+}
+
+export function getPriorityMeta(priority) {
+  return (
+    PRIORITY_LEVELS.find((p) => p.id === priority) ||
+    PRIORITY_LEVELS.find((p) => p.id === 'Sedang')
+  );
+}
+
+export function sortReportsByPriority(list = []) {
+  return [...list].sort((a, b) => {
+    const wA = getPriorityMeta(getReportPriority(a)).weight;
+    const wB = getPriorityMeta(getReportPriority(b)).weight;
+    return wB - wA;
+  });
+}
+
 const minsAgoIso = (minutes) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
 
 export const INITIAL_ADMIN_REPORTS = [
@@ -68,6 +133,7 @@ export const INITIAL_ADMIN_REPORTS = [
     id: 'SF-2026-001',
     title: 'Jalan Berlubang Kawasan Simpang Tujuh',
     category: 'Jalan Rusak',
+    priority: 'Tinggi',
     location: 'Jl. Simpang Tujuh, Kec. Kota Kudus',
     mapUrl: 'https://www.google.com/maps?q=-6.8048,110.8405',
     description: 'Lubang sedalam 15 cm di lajur kiri membahayakan pengendara motor saat malam hari.',
@@ -81,6 +147,7 @@ export const INITIAL_ADMIN_REPORTS = [
     id: 'SF-2026-002',
     title: 'Lampu Penerangan Jalan Mati Total',
     category: 'Lampu PJU',
+    priority: 'Sedang',
     location: 'Jl. Jenderal Sudirman, Rendeng, Kudus',
     mapUrl: 'https://www.google.com/maps?q=-6.8095,110.8482',
     description: 'Tiga tiang lampu PJU padam sejak 3 hari lalu membuat jalanan gelap gulita.',
@@ -94,6 +161,7 @@ export const INITIAL_ADMIN_REPORTS = [
     id: 'SF-2026-003',
     title: 'Saluran Air Tersumbat Sampah & Endapan',
     category: 'Drainase',
+    priority: 'Sedang',
     location: 'Jl. Sunan Muria, Barongan, Kudus',
     mapUrl: 'https://www.google.com/maps?q=-6.7985,110.8420',
     description: 'Air meluap ke badan jalan setiap kali hujan deras turun lebih dari 30 menit.',
@@ -107,6 +175,7 @@ export const INITIAL_ADMIN_REPORTS = [
     id: 'SF-2026-004',
     title: 'Trotoar Amblas Depan Taman Bojana',
     category: 'Halte & Trotoar',
+    priority: 'Rendah',
     location: 'Jl. Pemuda, Kec. Kota Kudus',
     mapUrl: 'https://www.google.com/maps?q=-6.8062,110.8418',
     description: 'Paving trotoar amblas sepanjang 3 meter dan berisiko membuat pejalan kaki tersandung.',
@@ -120,6 +189,7 @@ export const INITIAL_ADMIN_REPORTS = [
     id: 'SF-2026-005',
     title: 'Pohon Tumbang Menutup Sebagian Taman',
     category: 'Taman Kota',
+    priority: 'Tinggi',
     location: 'Taman Krida Wisata, Wergu Wetan, Kudus',
     mapUrl: 'https://www.google.com/maps?q=-6.8150,110.8490',
     description: 'Dahan pohon besar patah akibat angin kencang dan menghalangi jalur pejalan kaki.',
@@ -161,7 +231,6 @@ export function getReportOfficerUsernames(report) {
   return [];
 }
 
-// Mengubah bulan & tahun secara aman tanpa loncat tanggal di akhir bulan
 export function setAnchorMonthYear(baseMs, targetYear, targetMonth) {
   const d = new Date(baseMs);
   const maxDay = new Date(targetYear, targetMonth + 1, 0).getDate();
@@ -176,7 +245,6 @@ export function setAnchorMonthYear(baseMs, targetYear, targetMonth) {
   ).getTime();
 }
 
-// Menggeser periode maju (+1) atau mundur (-1) sesuai interval yang dipilih
 export function stepAnchorByTimeframe(baseMs, timeframe, direction) {
   const d = new Date(baseMs);
   if (timeframe === 'today') {
@@ -205,14 +273,6 @@ function parseTimestamp(value) {
 
 const DAY_NAMES = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 
-/**
- * Menghitung data grafik statistik secara realtime berdasarkan rentang waktu & acuan tanggal:
- * 'today' (Hari Ini - pembagian waktu 24 jam pada tanggal acuan),
- * '1d' (Per Hari - 7 hari),
- * '1w' (Per Minggu dalam bulan terpilih),
- * '1mo' (Per Bulan Jan–Des dalam tahun terpilih),
- * '1y' (Per Tahun)
- */
 export function buildRealtimeStats(
   reports = [],
   timeframe = 'today',
@@ -231,7 +291,6 @@ export function buildRealtimeStats(
   let periodSummary = '';
 
   if (timeframe === 'today') {
-    // 6 slot waktu (masing-masing 4 jam) sepanjang 1 hari penuh (00:00 - 24:00)
     for (let h = 0; h < 24; h += 4) {
       const start = new Date(year, month, date, h, 0, 0, 0).getTime();
       const end = new Date(year, month, date, h + 4, 0, 0, 0).getTime();
@@ -248,7 +307,6 @@ export function buildRealtimeStats(
     }
     periodSummary = `${DAY_NAMES[refDate.getDay()]}, ${date} ${MONTH_OPTIONS[month].full} ${year} (00:00–24:00)`;
   } else if (timeframe === '1w') {
-    // Per Minggu di Bulan & Tahun terpilih (Minggu 1 s/d Minggu 4/5)
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     let weekNum = 1;
     for (let startDay = 1; startDay <= daysInMonth; startDay += 7) {
@@ -267,7 +325,6 @@ export function buildRealtimeStats(
     }
     periodSummary = `${MONTH_OPTIONS[month].full} ${year} (${buckets.length} Minggu)`;
   } else if (timeframe === '1mo') {
-    // Per Bulan (Jan - Des) pada Tahun terpilih
     for (let m = 0; m < 12; m++) {
       const start = new Date(year, m, 1, 0, 0, 0).getTime();
       const end = new Date(year, m + 1, 1, 0, 0, 0).getTime();
@@ -282,7 +339,6 @@ export function buildRealtimeStats(
     }
     periodSummary = `Tahun ${year} (Januari – Desember)`;
   } else if (timeframe === '1y') {
-    // Per Tahun (5 tahun sekitar tahun terpilih)
     for (let y = year - 3; y <= year + 1; y++) {
       const start = new Date(y, 0, 1, 0, 0, 0).getTime();
       const end = new Date(y + 1, 0, 1, 0, 0, 0).getTime();
@@ -297,7 +353,6 @@ export function buildRealtimeStats(
     }
     periodSummary = `Rentang Tahun ${year - 3} – ${year + 1}`;
   } else {
-    // '1d' (Per Hari - 7 hari berakhir pada tanggal acuan)
     const dayStart = new Date(year, month, date).getTime();
     const dayMs = 24 * 60 * 60 * 1000;
     for (let i = 6; i >= 0; i--) {

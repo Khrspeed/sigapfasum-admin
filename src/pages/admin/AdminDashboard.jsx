@@ -30,15 +30,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Radio,
+  Flag,
+  ArrowUpDown,
 } from 'lucide-react';
 import {
   INITIAL_ADMIN_REPORTS,
   MONTH_OPTIONS,
+  PRIORITY_LEVELS,
   TIMEFRAME_OPTIONS,
   USERS_DB,
   buildRealtimeStats,
+  getPriorityMeta,
   getReportOfficerUsernames,
+  getReportPriority,
   setAnchorMonthYear,
+  sortReportsByPriority,
   stepAnchorByTimeframe,
 } from '../../data/adminMockData';
 
@@ -52,18 +58,21 @@ export default function AdminDashboard({
 }) {
   const [menu, setMenu] = useState('dashboard');
   const [statusFilter, setStatusFilter] = useState('semua');
+  const [priorityFilter, setPriorityFilter] = useState('semua');
+  const [sortByPriority, setSortByPriority] = useState(true);
   const [search, setSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
 
-  // State Statistik Realtime + Navigasi Bulan & Tahun (default: 'today' / Hari Ini)
+  // State Statistik Realtime + Navigasi Bulan & Tahun
   const [chartTimeframe, setChartTimeframe] = useState('today');
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [isLiveMode, setIsLiveMode] = useState(true);
   const [customAnchorMs, setCustomAnchorMs] = useState(() => Date.now());
 
-  // Modal Penugasan Multi-Petugas pada 1 Laporan
+  // Modal Penugasan Multi-Petugas & Prioritas pada 1 Laporan
   const [selectedReport, setSelectedReport] = useState(null);
   const [selectedOfficerUsernames, setSelectedOfficerUsernames] = useState([]);
+  const [selectedPriority, setSelectedPriority] = useState('Sedang');
 
   // Modal Tambah Petugas Baru
   const [isAddOfficerOpen, setIsAddOfficerOpen] = useState(false);
@@ -91,7 +100,6 @@ export default function AdminDashboard({
 
   const fileInputRef = useRef(null);
 
-  // Detak waktu realtime setiap 15 detik
   useEffect(() => {
     const timer = setInterval(() => {
       setNowTick(Date.now());
@@ -172,6 +180,9 @@ export default function AdminDashboard({
     verifikasi: reports.filter((r) => r.status === 'Menunggu Verifikasi').length,
     penanganan: reports.filter((r) => r.status === 'Dalam Penanganan' || r.status === 'Ditugaskan').length,
     selesai: reports.filter((r) => r.status === 'Laporan Selesai').length,
+    prioritasTinggi: reports.filter(
+      (r) => getReportPriority(r) === 'Tinggi' && r.status !== 'Laporan Selesai'
+    ).length,
   };
 
   const completionPercent = stats.total > 0 ? Math.round((stats.selesai / stats.total) * 100) : 0;
@@ -188,6 +199,7 @@ export default function AdminDashboard({
   const openManageReportModal = (report) => {
     setSelectedReport(report);
     setSelectedOfficerUsernames(getReportOfficerUsernames(report));
+    setSelectedPriority(getReportPriority(report));
   };
 
   const toggleOfficerSelection = (username) => {
@@ -203,6 +215,7 @@ export default function AdminDashboard({
         const hasOfficers = selectedOfficerUsernames.length > 0;
         return {
           ...r,
+          priority: selectedPriority,
           assignedOfficers: selectedOfficerUsernames,
           updatedAt: new Date().toISOString(),
           status: hasOfficers
@@ -221,7 +234,13 @@ export default function AdminDashboard({
     setReports((prev) =>
       prev.map((r) =>
         r.id === reportId
-          ? { ...r, status: 'Ditolak', assignedOfficers: [], updatedAt: new Date().toISOString() }
+          ? {
+              ...r,
+              priority: selectedPriority,
+              status: 'Ditolak',
+              assignedOfficers: [],
+              updatedAt: new Date().toISOString(),
+            }
           : r
       )
     );
@@ -359,6 +378,7 @@ export default function AdminDashboard({
       'ID Tiket',
       'Judul Kerusakan',
       'Kategori',
+      'Tingkat Prioritas',
       'Lokasi',
       'Status',
       'Petugas Ditugaskan',
@@ -373,6 +393,7 @@ export default function AdminDashboard({
         escapeCsv(r.id),
         escapeCsv(r.title),
         escapeCsv(r.category),
+        escapeCsv(getReportPriority(r)),
         escapeCsv(r.location),
         escapeCsv(r.status),
         escapeCsv(names ? names.join(', ') : 'Belum ditugaskan'),
@@ -435,18 +456,41 @@ export default function AdminDashboard({
     setBackupNotice({ type: 'success', text: 'Data laporan dan daftar petugas berhasil direset.' });
   };
 
-  const filteredReports = reports.filter((r) => {
+  const baseFilteredReports = reports.filter((r) => {
     const matchText =
       r.id.toLowerCase().includes(search.toLowerCase()) ||
       r.title.toLowerCase().includes(search.toLowerCase()) ||
       r.location.toLowerCase().includes(search.toLowerCase());
-    if (statusFilter === 'verifikasi') return matchText && r.status === 'Menunggu Verifikasi';
-    if (statusFilter === 'penanganan') {
-      return matchText && (r.status === 'Dalam Penanganan' || r.status === 'Ditugaskan');
+    if (!matchText) return false;
+
+    if (priorityFilter !== 'semua' && getReportPriority(r) !== priorityFilter) {
+      return false;
     }
-    if (statusFilter === 'selesai') return matchText && r.status === 'Laporan Selesai';
-    return matchText;
+
+    if (statusFilter === 'verifikasi') return r.status === 'Menunggu Verifikasi';
+    if (statusFilter === 'penanganan') {
+      return r.status === 'Dalam Penanganan' || r.status === 'Ditugaskan';
+    }
+    if (statusFilter === 'selesai') return r.status === 'Laporan Selesai';
+    return true;
   });
+
+  const filteredReports = sortByPriority
+    ? sortReportsByPriority(baseFilteredReports)
+    : baseFilteredReports;
+
+  const renderPriorityBadge = (report) => {
+    const prio = getReportPriority(report);
+    const meta = getPriorityMeta(prio);
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${meta.badgeClass}`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
+        {meta.label}
+      </span>
+    );
+  };
 
   const pageBg = darkMode ? 'bg-[#0b0f17] text-slate-100' : 'bg-[#f4f7fb] text-slate-900';
   const cardBg = darkMode
@@ -604,9 +648,23 @@ export default function AdminDashboard({
                 Pantau pengaduan fasilitas umum & distribusi tugas lapangan Kabupaten Kudus.
               </p>
             </div>
-            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-blue-600/10 text-blue-600 self-start sm:self-auto">
-              <MapPin className="w-3.5 h-3.5" /> Kabupaten Kudus • Admin Panel
-            </span>
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              {stats.prioritasTinggi > 0 && (
+                <button
+                  onClick={() => {
+                    setMenu('laporan');
+                    setStatusFilter('semua');
+                    setPriorityFilter('Tinggi');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-extrabold bg-red-500/10 text-red-600 hover:bg-red-500/20 transition cursor-pointer"
+                >
+                  <Flag className="w-3.5 h-3.5" /> {stats.prioritasTinggi} Prioritas Tinggi
+                </button>
+              )}
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-blue-600/10 text-blue-600">
+                <MapPin className="w-3.5 h-3.5" /> Kabupaten Kudus
+              </span>
+            </div>
           </div>
 
           {/* VIEW 1: OVERVIEW */}
@@ -830,7 +888,7 @@ export default function AdminDashboard({
                       </button>
                     </div>
 
-                    {/* 5 Pilihan Rentang Waktu: Hari Ini, Per Hari, Per Minggu, Per Bulan, Per Tahun */}
+                    {/* 5 Pilihan Rentang Waktu */}
                     <div className={`flex flex-wrap gap-1 p-1 rounded-2xl border ${subCardBg}`}>
                       {TIMEFRAME_OPTIONS.map((opt) => {
                         const active = chartTimeframe === opt.id;
@@ -925,17 +983,27 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              {/* Row 2: Laporan Terbaru */}
+              {/* Row 2: Laporan Terbaru (Diurutkan Prioritas Tertinggi) */}
               <div className={`rounded-[28px] border p-6 space-y-4 ${cardBg}`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h3 className="text-base font-extrabold">Aktivitas Laporan Warga Terbaru</h3>
                     <p className={`text-xs ${mutedText}`}>
-                      Klik tombol Kelola untuk memverifikasi atau menugaskan satu maupun beberapa petugas.
+                      Klik tombol Kelola untuk mengatur tingkat prioritas (Rendah/Sedang/Tinggi) dan menugaskan petugas.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1 sm:w-64">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSortByPriority(!sortByPriority)}
+                      className={`px-3.5 py-2 rounded-full border text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                        sortByPriority ? 'bg-blue-600/10 border-blue-600/30 text-blue-600' : subCardBg
+                      }`}
+                    >
+                      <ArrowUpDown className="w-3.5 h-3.5" />
+                      {sortByPriority ? 'Urut Prioritas' : 'Urut Default'}
+                    </button>
+                    <div className="relative flex-1 sm:w-56">
                       <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
                       <input
                         type="text"
@@ -960,6 +1028,7 @@ export default function AdminDashboard({
                       <tr className={`border-b text-[11px] uppercase ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
                         <th className="py-3 px-2">Tiket</th>
                         <th className="py-3 px-2">Kerusakan & Lokasi</th>
+                        <th className="py-3 px-2">Prioritas</th>
                         <th className="py-3 px-2">Petugas</th>
                         <th className="py-3 px-2">Status</th>
                         <th className="py-3 px-2 text-right">Aksi</th>
@@ -996,6 +1065,7 @@ export default function AdminDashboard({
                                 </div>
                               </div>
                             </td>
+                            <td className="py-3.5 px-2">{renderPriorityBadge(item)}</td>
                             <td className="py-3.5 px-2">
                               {assignedNames ? (
                                 <div className="flex flex-wrap gap-1">
@@ -1038,37 +1108,82 @@ export default function AdminDashboard({
           {/* VIEW 2: DAFTAR LENGKAP LAPORAN */}
           {menu === 'laporan' && (
             <div className={`rounded-[28px] border p-6 space-y-5 ${cardBg}`}>
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { id: 'semua', label: 'Semua' },
-                    { id: 'verifikasi', label: 'Verifikasi' },
-                    { id: 'penanganan', label: 'Penanganan' },
-                    { id: 'selesai', label: 'Selesai' },
-                  ].map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => setStatusFilter(f.id)}
-                      className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                        statusFilter === f.id
-                          ? 'bento-blue-3d text-white'
-                          : `${subCardBg} ${mutedText}`
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  {/* Filter Status */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { id: 'semua', label: 'Semua Status' },
+                      { id: 'verifikasi', label: 'Verifikasi' },
+                      { id: 'penanganan', label: 'Penanganan' },
+                      { id: 'selesai', label: 'Selesai' },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        onClick={() => setStatusFilter(f.id)}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+                          statusFilter === f.id
+                            ? 'bento-blue-3d text-white'
+                            : `${subCardBg} ${mutedText}`
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative w-full md:w-72">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Cari ID tiket, judul, atau lokasi..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className={`w-full pl-9 pr-3 py-2 rounded-full border text-xs focus:outline-none focus:ring-2 focus:ring-blue-600 ${subCardBg}`}
+                    />
+                  </div>
                 </div>
 
-                <div className="relative w-full md:w-72">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Cari ID tiket, judul, atau lokasi..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className={`w-full pl-9 pr-3 py-2 rounded-full border text-xs focus:outline-none focus:ring-2 focus:ring-blue-600 ${subCardBg}`}
-                  />
+                {/* Filter Tingkat Prioritas & Urutan */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`text-[11px] font-bold mr-1 ${mutedText}`}>Prioritas:</span>
+                    {[
+                      { id: 'semua', label: 'Semua' },
+                      { id: 'Tinggi', label: 'Tinggi' },
+                      { id: 'Sedang', label: 'Sedang' },
+                      { id: 'Rendah', label: 'Rendah' },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setPriorityFilter(p.id)}
+                        className={`px-3 py-1 rounded-full text-[11px] font-extrabold border transition cursor-pointer ${
+                          priorityFilter === p.id
+                            ? p.id === 'Tinggi'
+                              ? 'bg-red-600 text-white border-red-600'
+                              : p.id === 'Sedang'
+                              ? 'bg-amber-500 text-white border-amber-500'
+                              : p.id === 'Rendah'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-[#0f172a] text-white border-[#0f172a]'
+                            : `${subCardBg} ${mutedText}`
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSortByPriority(!sortByPriority)}
+                    className={`px-3.5 py-1.5 rounded-full border text-[11px] font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                      sortByPriority ? 'bg-blue-600/10 border-blue-600/30 text-blue-600' : subCardBg
+                    }`}
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5" />
+                    {sortByPriority ? 'Urutan: Prioritas Tertinggi' : 'Urutan: Terbaru'}
+                  </button>
                 </div>
               </div>
 
@@ -1078,6 +1193,7 @@ export default function AdminDashboard({
                     <tr className={`border-b text-[11px] uppercase ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
                       <th className="py-3 px-2">Tiket</th>
                       <th className="py-3 px-2">Judul & Lokasi</th>
+                      <th className="py-3 px-2">Prioritas</th>
                       <th className="py-3 px-2">Pelapor</th>
                       <th className="py-3 px-2">Petugas</th>
                       <th className="py-3 px-2">Status</th>
@@ -1106,6 +1222,7 @@ export default function AdminDashboard({
                               )}
                             </div>
                           </td>
+                          <td className="py-3.5 px-2">{renderPriorityBadge(item)}</td>
                           <td className={`py-3.5 px-2 ${mutedText}`}>{item.reporter || 'Warga Kudus'}</td>
                           <td className="py-3.5 px-2">
                             {assignedNames ? (
@@ -1192,8 +1309,8 @@ export default function AdminDashboard({
                     },
                     {
                       key: 'autoNotifOfficer',
-                      title: 'Distribusi Tugas Multi-Petugas',
-                      desc: 'Memungkinkan satu laporan ditangani lebih dari satu petugas secara bersamaan.',
+                      title: 'Distribusi Tugas Multi-Petugas & Prioritas',
+                      desc: 'Mengurutkan penanganan laporan berdasarkan tingkat urgensi Rendah, Sedang, dan Tinggi.',
                     },
                     {
                       key: 'antiSpamFilter',
@@ -1276,8 +1393,10 @@ export default function AdminDashboard({
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {officers.map((off) => {
-                    const officerReports = reports.filter((r) =>
-                      getReportOfficerUsernames(r).includes(off.username)
+                    const officerReports = sortReportsByPriority(
+                      reports.filter((r) =>
+                        getReportOfficerUsernames(r).includes(off.username)
+                      )
                     );
                     const activeCount = officerReports.filter(
                       (r) => r.status !== 'Laporan Selesai'
@@ -1320,16 +1439,30 @@ export default function AdminDashboard({
                               <p className={`text-[11px] italic ${mutedText}`}>Belum ada tugas</p>
                             ) : (
                               <ul className="space-y-1 text-[11px]">
-                                {officerReports.map((rep) => (
-                                  <li
-                                    key={rep.id}
-                                    className="flex items-center justify-between gap-2 truncate"
-                                  >
-                                    <span className="truncate font-semibold">
-                                      • {rep.id}: {rep.title}
-                                    </span>
-                                  </li>
-                                ))}
+                                {officerReports.map((rep) => {
+                                  const pLabel = getReportPriority(rep);
+                                  return (
+                                    <li
+                                      key={rep.id}
+                                      className="flex items-center justify-between gap-2"
+                                    >
+                                      <span className="truncate font-semibold">
+                                        • {rep.id}: {rep.title}
+                                      </span>
+                                      <span
+                                        className={`text-[10px] font-extrabold shrink-0 ${
+                                          pLabel === 'Tinggi'
+                                            ? 'text-red-500'
+                                            : pLabel === 'Sedang'
+                                            ? 'text-amber-500'
+                                            : 'text-emerald-500'
+                                        }`}
+                                      >
+                                        [{pLabel}]
+                                      </span>
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             )}
                           </div>
@@ -1385,7 +1518,7 @@ export default function AdminDashboard({
                     </div>
                     <h3 className="text-base font-extrabold pt-1">Unduh Cadangan Penuh (.JSON)</h3>
                     <p className={`text-xs leading-relaxed ${mutedText}`}>
-                      Simpan seluruh database laporan ({reports.length} tiket) dan data akun ({officers.length} petugas) ke satu file cadangan.
+                      Simpan seluruh database laporan ({reports.length} tiket) beserta tingkat prioritas dan data akun ({officers.length} petugas).
                     </p>
                   </div>
                   <button
@@ -1462,7 +1595,7 @@ export default function AdminDashboard({
             </div>
           )}
 
-          {/* MODAL 1: PENUGASAN BEBAS MULTI-PETUGAS PADA 1 LAPORAN */}
+          {/* MODAL 1: ATUR PRIORITAS & PENUGASAN MULTI-PETUGAS PADA 1 LAPORAN */}
           {selectedReport && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
               <div className={`rounded-[28px] border max-w-lg w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto ${cardBg}`}>
@@ -1485,9 +1618,50 @@ export default function AdminDashboard({
                   <p className={`text-xs mt-1 ${mutedText}`}>{selectedReport.description}</p>
                 </div>
 
+                {/* PILIH TINGKAT PRIORITAS */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-extrabold">
+                    Tingkat Prioritas Penanganan:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {PRIORITY_LEVELS.map((lvl) => {
+                      const isActive = selectedPriority === lvl.id;
+                      return (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          onClick={() => setSelectedPriority(lvl.id)}
+                          className={`p-2.5 rounded-2xl border text-left transition cursor-pointer ${
+                            isActive
+                              ? lvl.activeBtnClass
+                              : `${subCardBg} ${mutedText} hover:border-blue-500/50`
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                isActive ? 'bg-white' : lvl.dotClass
+                              }`}
+                            />
+                            <span className="text-xs font-extrabold">{lvl.label}</span>
+                          </div>
+                          <p
+                            className={`text-[10px] mt-0.5 leading-tight ${
+                              isActive ? 'text-white/90' : 'opacity-75'
+                            }`}
+                          >
+                            {lvl.desc}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* PILIH PETUGAS */}
                 <div className="pt-1 space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold">
+                    <label className="block text-xs font-extrabold">
                       Pilih Petugas (Bisa pilih 1 atau lebih):
                     </label>
                     <div className="flex gap-2 text-[11px] font-bold">
@@ -1508,7 +1682,7 @@ export default function AdminDashboard({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
                     {officers.map((off) => {
                       const checked = selectedOfficerUsernames.includes(off.username);
                       return (
@@ -1663,11 +1837,11 @@ export default function AdminDashboard({
                 </div>
 
                 <p className={`text-xs ${mutedText}`}>
-                  Centang laporan mana saja yang ingin dikerjakan oleh <strong>{assignToOfficerTarget.name}</strong> (bisa memilih lebih dari satu tugas):
+                  Centang laporan mana saja yang ingin dikerjakan oleh <strong>{assignToOfficerTarget.name}</strong>:
                 </p>
 
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                  {reports.map((rep) => {
+                  {sortReportsByPriority(reports).map((rep) => {
                     const checked = selectedReportIdsForOfficer.includes(rep.id);
                     return (
                       <button
@@ -1681,11 +1855,12 @@ export default function AdminDashboard({
                         }`}
                       >
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-extrabold text-blue-600">{rep.id}</span>
+                            {renderPriorityBadge(rep)}
                             <span className={`text-[10px] font-bold ${mutedText}`}>• {rep.status}</span>
                           </div>
-                          <p className="text-xs font-bold truncate mt-0.5">{rep.title}</p>
+                          <p className="text-xs font-bold truncate mt-1">{rep.title}</p>
                           <p className={`text-[11px] truncate ${mutedText}`}>{rep.location}</p>
                         </div>
                         <div

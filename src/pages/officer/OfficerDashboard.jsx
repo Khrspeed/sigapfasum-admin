@@ -24,13 +24,17 @@ import {
   MONTH_OPTIONS,
   TIMEFRAME_OPTIONS,
   buildRealtimeStats,
+  getPriorityMeta,
   getReportOfficerUsernames,
+  getReportPriority,
   setAnchorMonthYear,
+  sortReportsByPriority,
   stepAnchorByTimeframe,
 } from '../../data/adminMockData';
 
 export default function OfficerDashboard({ user, users = [], reports, setReports, onLogout }) {
   const [menu, setMenu] = useState('dashboard');
+  const [priorityFilter, setPriorityFilter] = useState('semua');
   const [darkMode, setDarkMode] = useState(false);
 
   const [chartTimeframe, setChartTimeframe] = useState('today');
@@ -103,10 +107,21 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
   const myTasks = reports.filter((r) =>
     getReportOfficerUsernames(r).includes(user.username)
   );
-  const activeTasks = myTasks.filter((r) => r.status !== 'Laporan Selesai');
+
+  // Urutkan tugas aktif petugas otomatis dari prioritas Tinggi -> Sedang -> Rendah
+  const sortedActiveTasks = sortReportsByPriority(
+    myTasks.filter((r) => r.status !== 'Laporan Selesai')
+  );
+  const filteredActiveTasks =
+    priorityFilter === 'semua'
+      ? sortedActiveTasks
+      : sortedActiveTasks.filter((r) => getReportPriority(r) === priorityFilter);
+
   const pendingTasks = myTasks.filter((r) => r.status === 'Ditugaskan');
   const inProgressTasks = myTasks.filter((r) => r.status === 'Dalam Penanganan');
-  const doneTasks = myTasks.filter((r) => r.status === 'Laporan Selesai');
+  const doneTasks = sortReportsByPriority(
+    myTasks.filter((r) => r.status === 'Laporan Selesai')
+  );
 
   const officerRealtimeStats = buildRealtimeStats(
     reports,
@@ -148,6 +163,19 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
       const found = users.find((u) => u.username === uname);
       return found ? found.name : uname;
     });
+  };
+
+  const renderPriorityBadge = (report) => {
+    const prio = getReportPriority(report);
+    const meta = getPriorityMeta(prio);
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${meta.badgeClass}`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
+        Prioritas {meta.label}
+      </span>
+    );
   };
 
   const pageBg = darkMode ? 'bg-[#0b0f17] text-slate-100' : 'bg-[#f4f7fb] text-slate-900';
@@ -210,7 +238,7 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
               }`}
             >
               <Bell className="w-4 h-4" />
-              {activeTasks.length > 0 && (
+              {sortedActiveTasks.length > 0 && (
                 <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-blue-600" />
               )}
             </button>
@@ -569,23 +597,52 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
             </div>
           )}
 
-          {/* LIST TUGAS AKTIF */}
+          {/* LIST TUGAS AKTIF (DIURUTKAN DARI PRIORITAS TINGGI KE RENDAH) */}
           {(menu === 'dashboard' || menu === 'tugas') && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-extrabold">Daftar Tugas Lapangan ({user.name})</h2>
-                <span className={`text-xs font-bold ${mutedText}`}>
-                  {activeTasks.length} tugas perlu ditangani
-                </span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div>
+                  <h2 className="text-base font-extrabold">Daftar Tugas Lapangan ({user.name})</h2>
+                  <p className={`text-[11px] ${mutedText}`}>
+                    Diurutkan otomatis berdasarkan tingkat prioritas (Tinggi → Sedang → Rendah).
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { id: 'semua', label: `Semua (${sortedActiveTasks.length})` },
+                    { id: 'Tinggi', label: 'Tinggi' },
+                    { id: 'Sedang', label: 'Sedang' },
+                    { id: 'Rendah', label: 'Rendah' },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setPriorityFilter(p.id)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-extrabold border transition cursor-pointer ${
+                        priorityFilter === p.id
+                          ? p.id === 'Tinggi'
+                            ? 'bg-red-600 text-white border-red-600'
+                            : p.id === 'Sedang'
+                            ? 'bg-amber-500 text-white border-amber-500'
+                            : p.id === 'Rendah'
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-[#0f172a] text-white border-[#0f172a]'
+                          : `${subCardBg} ${mutedText}`
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {activeTasks.length === 0 ? (
+              {filteredActiveTasks.length === 0 ? (
                 <div className={`rounded-[28px] border p-8 text-center text-xs ${cardBg} ${mutedText}`}>
-                  Semua tugas lapangan sudah selesai dikerjakan.
+                  Tidak ada tugas aktif pada kategori prioritas ini.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {activeTasks.map((task) => {
+                  {filteredActiveTasks.map((task) => {
                     const coWorkers = getCoWorkers(task);
                     return (
                       <div
@@ -598,9 +655,12 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
                             alt={task.title}
                             className="w-full h-40 object-cover rounded-2xl mb-3.5"
                           />
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-xs font-extrabold text-blue-600">{task.id}</span>
-                            <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-blue-600/10 text-blue-600">
+                            {renderPriorityBadge(task)}
+                          </div>
+                          <div className="mt-2">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-600/10 text-blue-600">
                               {task.status}
                             </span>
                           </div>
@@ -670,11 +730,9 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
                   {doneTasks.map((task) => (
                     <div key={task.id} className={`rounded-[28px] border p-5 space-y-2.5 ${cardBg}`}>
                       <img src={task.image} alt={task.title} className="w-full h-40 object-cover rounded-2xl" />
-                      <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                         <span className="text-xs font-extrabold text-blue-600">{task.id}</span>
-                        <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-500">
-                          Laporan Selesai
-                        </span>
+                        {renderPriorityBadge(task)}
                       </div>
                       <h3 className="text-base font-extrabold">{task.title}</h3>
                       <p className={`text-xs ${mutedText}`}>{task.location}</p>
