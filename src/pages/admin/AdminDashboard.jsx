@@ -27,20 +27,20 @@ import {
   Trash2,
   Plus,
   Check,
+  ChevronLeft,
+  ChevronRight,
+  Radio,
 } from 'lucide-react';
 import {
   INITIAL_ADMIN_REPORTS,
+  MONTH_OPTIONS,
+  TIMEFRAME_OPTIONS,
   USERS_DB,
   buildRealtimeStats,
   getReportOfficerUsernames,
+  setAnchorMonthYear,
+  stepAnchorByTimeframe,
 } from '../../data/adminMockData';
-
-const TIMEFRAME_OPTIONS = [
-  { id: '30m', label: '30 Menit' },
-  { id: '1h', label: '1 Jam' },
-  { id: '1d', label: 'Per Hari' },
-  { id: '1mo', label: 'Per Bulan' },
-];
 
 export default function AdminDashboard({
   user,
@@ -55,9 +55,11 @@ export default function AdminDashboard({
   const [search, setSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
 
-  // State Statistik Realtime
-  const [chartTimeframe, setChartTimeframe] = useState('1d');
+  // State Statistik Realtime + Navigasi Bulan & Tahun (default: 'today' / Hari Ini)
+  const [chartTimeframe, setChartTimeframe] = useState('today');
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [isLiveMode, setIsLiveMode] = useState(true);
+  const [customAnchorMs, setCustomAnchorMs] = useState(() => Date.now());
 
   // Modal Penugasan Multi-Petugas pada 1 Laporan
   const [selectedReport, setSelectedReport] = useState(null);
@@ -89,7 +91,7 @@ export default function AdminDashboard({
 
   const fileInputRef = useRef(null);
 
-  // Detak waktu realtime setiap 15 detik agar slot 30 menit / 1 jam selalu ter-update
+  // Detak waktu realtime setiap 15 detik
   useEffect(() => {
     const timer = setInterval(() => {
       setNowTick(Date.now());
@@ -97,8 +99,52 @@ export default function AdminDashboard({
     return () => clearInterval(timer);
   }, []);
 
+  const activeAnchorMs = isLiveMode ? nowTick : customAnchorMs;
+  const anchorDateObj = new Date(activeAnchorMs);
+  const selectedMonth = anchorDateObj.getMonth();
+  const selectedYear = anchorDateObj.getFullYear();
+
+  const baseCurrentYear = new Date(nowTick).getFullYear();
+  const yearOptions = Array.from(
+    new Set([
+      baseCurrentYear - 2,
+      baseCurrentYear - 1,
+      baseCurrentYear,
+      baseCurrentYear + 1,
+      baseCurrentYear + 2,
+      selectedYear - 1,
+      selectedYear,
+      selectedYear + 1,
+    ])
+  ).sort((a, b) => a - b);
+
+  const handleChangeMonth = (newMonth) => {
+    const updated = setAnchorMonthYear(activeAnchorMs, selectedYear, Number(newMonth));
+    setCustomAnchorMs(updated);
+    setIsLiveMode(false);
+  };
+
+  const handleChangeYear = (newYear) => {
+    const updated = setAnchorMonthYear(activeAnchorMs, Number(newYear), selectedMonth);
+    setCustomAnchorMs(updated);
+    setIsLiveMode(false);
+  };
+
+  const handleStepPeriod = (direction) => {
+    const updated = stepAnchorByTimeframe(activeAnchorMs, chartTimeframe, direction);
+    setCustomAnchorMs(updated);
+    setIsLiveMode(false);
+  };
+
+  const handleResetToLive = () => {
+    const now = Date.now();
+    setNowTick(now);
+    setCustomAnchorMs(now);
+    setIsLiveMode(true);
+  };
+
   const officers = users.filter((u) => u.role === 'officer');
-  const realtimeStats = buildRealtimeStats(reports, chartTimeframe, nowTick);
+  const realtimeStats = buildRealtimeStats(reports, chartTimeframe, activeAnchorMs);
   const liveClockLabel = new Date(nowTick).toLocaleTimeString('id-ID', {
     hour: '2-digit',
     minute: '2-digit',
@@ -698,38 +744,102 @@ export default function AdminDashboard({
                   </div>
                 </div>
 
-                {/* Kolom Kanan: Grafik Statistik Realtime */}
-                <div className={`lg:col-span-4 rounded-[28px] border p-6 flex flex-col justify-between ${cardBg}`}>
-                  <div className="space-y-3">
+                {/* Kolom Kanan: Grafik Statistik Realtime + Navigasi Bulan & Tahun */}
+                <div className={`lg:col-span-4 rounded-[28px] border p-5 sm:p-6 flex flex-col justify-between ${cardBg}`}>
+                  <div className="space-y-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <h3 className="text-sm font-extrabold">Statistik Penanganan</h3>
                         <p className={`text-[11px] mt-0.5 ${mutedText}`}>
-                          Perbandingan laporan masuk & selesai
+                          {realtimeStats.periodSummary}
                         </p>
                       </div>
-                      <span
-                        title={`Terakhir diperbarui: ${liveClockLabel}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-500 shrink-0"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                        Live {liveClockLabel.slice(0, 5)}
-                      </span>
+
+                      {isLiveMode ? (
+                        <span
+                          title={`Sinkron realtime: ${liveClockLabel}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-500 shrink-0"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                          Live {liveClockLabel.slice(0, 5)}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleResetToLive}
+                          title="Kembali ke waktu realtime sekarang"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer shrink-0"
+                        >
+                          <Radio className="w-3 h-3" /> Ke Live
+                        </button>
+                      )}
                     </div>
 
-                    {/* Pilihan Interval Waktu Realtime */}
-                    <div className={`grid grid-cols-4 gap-1 p-1 rounded-full border ${subCardBg}`}>
+                    {/* Bar Navigasi Bulan Sebelumnya / Bulan Depan & Tahun */}
+                    <div className={`flex items-center justify-between gap-1.5 p-1 rounded-full border ${subCardBg}`}>
+                      <button
+                        type="button"
+                        onClick={() => handleStepPeriod(-1)}
+                        title="Periode / Bulan / Tahun Sebelumnya"
+                        className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-blue-600/10 hover:text-blue-600 transition cursor-pointer shrink-0"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          aria-label="Pilih Bulan"
+                          value={selectedMonth}
+                          onChange={(e) => handleChangeMonth(e.target.value)}
+                          className={`text-[11px] font-extrabold bg-transparent focus:outline-none cursor-pointer px-1.5 py-0.5 rounded-lg ${
+                            darkMode ? 'text-slate-100 [&>option]:bg-[#141b29]' : 'text-slate-800'
+                          }`}
+                        >
+                          {MONTH_OPTIONS.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {m.full}
+                            </option>
+                          ))}
+                        </select>
+
+                        <span className={`text-[10px] ${mutedText}`}>•</span>
+
+                        <select
+                          aria-label="Pilih Tahun"
+                          value={selectedYear}
+                          onChange={(e) => handleChangeYear(e.target.value)}
+                          className={`text-[11px] font-extrabold bg-transparent focus:outline-none cursor-pointer px-1.5 py-0.5 rounded-lg ${
+                            darkMode ? 'text-blue-400 [&>option]:bg-[#141b29]' : 'text-blue-600'
+                          }`}
+                        >
+                          {yearOptions.map((yr) => (
+                            <option key={yr} value={yr}>
+                              {yr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleStepPeriod(1)}
+                        title="Periode / Bulan / Tahun Berikutnya"
+                        className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-blue-600/10 hover:text-blue-600 transition cursor-pointer shrink-0"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* 5 Pilihan Rentang Waktu: Hari Ini, Per Hari, Per Minggu, Per Bulan, Per Tahun */}
+                    <div className={`flex flex-wrap gap-1 p-1 rounded-2xl border ${subCardBg}`}>
                       {TIMEFRAME_OPTIONS.map((opt) => {
                         const active = chartTimeframe === opt.id;
                         return (
                           <button
                             key={opt.id}
                             type="button"
-                            onClick={() => {
-                              setChartTimeframe(opt.id);
-                              setNowTick(Date.now());
-                            }}
-                            className={`py-1 px-2 rounded-full text-[10px] font-extrabold transition cursor-pointer ${
+                            onClick={() => setChartTimeframe(opt.id)}
+                            className={`flex-1 basis-[30%] py-1 px-2 rounded-xl text-[10px] font-extrabold transition cursor-pointer ${
                               active
                                 ? 'bento-blue-3d text-white shadow-xs'
                                 : `${mutedText} hover:text-blue-600`
@@ -759,40 +869,58 @@ export default function AdminDashboard({
                     </div>
                   </div>
 
-                  {/* Batang Grafik Realtime */}
-                  <div className="grid grid-cols-7 gap-2 items-end h-40 pt-5">
-                    {realtimeStats.items.map((item) => (
-                      <div
-                        key={item.fullLabel}
-                        className="flex flex-col items-center gap-1.5 h-full justify-end group relative"
-                        title={`${item.fullLabel} • Masuk: ${item.masuk}, Selesai: ${item.selesai}`}
-                      >
-                        <span className="text-[9px] font-extrabold text-blue-600 opacity-80 group-hover:opacity-100">
-                          {item.masuk}/{item.selesai}
-                        </span>
-                        <div className="w-full flex items-end justify-center gap-1 h-24">
-                          <div
-                            style={{ height: `${item.masukHeight}%` }}
-                            className={`w-2.5 rounded-full transition-all duration-500 group-hover:scale-y-105 ${
-                              item.masuk > 0 ? 'bento-blue-3d' : 'bg-blue-600/20'
-                            }`}
-                          />
-                          <div
-                            style={{ height: `${item.selesaiHeight}%` }}
-                            className={`w-2.5 rounded-full transition-all duration-500 ${
-                              item.selesai > 0
-                                ? darkMode
-                                  ? 'bg-slate-400'
-                                  : 'bg-[#0f172a]'
-                                : darkMode
-                                ? 'bg-slate-700/60'
-                                : 'bg-slate-300/60'
-                            }`}
-                          />
+                  {/* Batang Grafik Dinamis */}
+                  <div
+                    style={{
+                      gridTemplateColumns: `repeat(${realtimeStats.items.length}, minmax(0, 1fr))`,
+                    }}
+                    className="grid gap-1.5 items-end h-36 pt-4"
+                  >
+                    {realtimeStats.items.map((item) => {
+                      const isCompact = realtimeStats.items.length > 7;
+                      return (
+                        <div
+                          key={item.fullLabel}
+                          className="flex flex-col items-center gap-1 h-full justify-end group"
+                          title={`${item.fullLabel} • Masuk: ${item.masuk}, Selesai: ${item.selesai}`}
+                        >
+                          <span className="text-[8px] sm:text-[9px] font-extrabold text-blue-600 opacity-80 group-hover:opacity-100">
+                            {item.masuk}/{item.selesai}
+                          </span>
+                          <div className="w-full flex items-end justify-center gap-0.5 sm:gap-1 h-20">
+                            <div
+                              style={{ height: `${item.masukHeight}%` }}
+                              className={`${
+                                isCompact ? 'w-1.5' : 'w-2.5'
+                              } rounded-full transition-all duration-500 group-hover:scale-y-105 ${
+                                item.masuk > 0 ? 'bento-blue-3d' : 'bg-blue-600/20'
+                              }`}
+                            />
+                            <div
+                              style={{ height: `${item.selesaiHeight}%` }}
+                              className={`${
+                                isCompact ? 'w-1.5' : 'w-2.5'
+                              } rounded-full transition-all duration-500 ${
+                                item.selesai > 0
+                                  ? darkMode
+                                    ? 'bg-slate-400'
+                                    : 'bg-[#0f172a]'
+                                  : darkMode
+                                  ? 'bg-slate-700/60'
+                                  : 'bg-slate-300/60'
+                              }`}
+                            />
+                          </div>
+                          <span
+                            className={`${
+                              isCompact ? 'text-[8px]' : 'text-[9px] sm:text-[10px]'
+                            } font-bold truncate max-w-full ${mutedText}`}
+                          >
+                            {item.label}
+                          </span>
                         </div>
-                        <span className={`text-[10px] font-bold ${mutedText}`}>{item.label}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>

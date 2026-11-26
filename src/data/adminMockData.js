@@ -132,10 +132,66 @@ export const INITIAL_ADMIN_REPORTS = [
   },
 ];
 
+export const TIMEFRAME_OPTIONS = [
+  { id: 'today', label: 'Hari Ini' },
+  { id: '1d', label: 'Per Hari' },
+  { id: '1w', label: 'Per Minggu' },
+  { id: '1mo', label: 'Per Bulan' },
+  { id: '1y', label: 'Per Tahun' },
+];
+
+export const MONTH_OPTIONS = [
+  { value: 0, short: 'Jan', full: 'Januari' },
+  { value: 1, short: 'Feb', full: 'Februari' },
+  { value: 2, short: 'Mar', full: 'Maret' },
+  { value: 3, short: 'Apr', full: 'April' },
+  { value: 4, short: 'Mei', full: 'Mei' },
+  { value: 5, short: 'Jun', full: 'Juni' },
+  { value: 6, short: 'Jul', full: 'Juli' },
+  { value: 7, short: 'Agu', full: 'Agustus' },
+  { value: 8, short: 'Sep', full: 'September' },
+  { value: 9, short: 'Okt', full: 'Oktober' },
+  { value: 10, short: 'Nov', full: 'November' },
+  { value: 11, short: 'Des', full: 'Desember' },
+];
+
 export function getReportOfficerUsernames(report) {
   if (Array.isArray(report.assignedOfficers)) return report.assignedOfficers;
   if (report.assignedToUsername) return [report.assignedToUsername];
   return [];
+}
+
+// Mengubah bulan & tahun secara aman tanpa loncat tanggal di akhir bulan
+export function setAnchorMonthYear(baseMs, targetYear, targetMonth) {
+  const d = new Date(baseMs);
+  const maxDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const safeDay = Math.min(d.getDate(), maxDay);
+  return new Date(
+    targetYear,
+    targetMonth,
+    safeDay,
+    d.getHours(),
+    d.getMinutes(),
+    d.getSeconds()
+  ).getTime();
+}
+
+// Menggeser periode maju (+1) atau mundur (-1) sesuai interval yang dipilih
+export function stepAnchorByTimeframe(baseMs, timeframe, direction) {
+  const d = new Date(baseMs);
+  if (timeframe === 'today') {
+    return baseMs + direction * 24 * 60 * 60 * 1000;
+  }
+  if (timeframe === '1d') {
+    return baseMs + direction * 7 * 24 * 60 * 60 * 1000;
+  }
+  if (timeframe === '1w') {
+    return setAnchorMonthYear(baseMs, d.getFullYear(), d.getMonth() + direction);
+  }
+  if (timeframe === '1mo' || timeframe === '1y') {
+    return setAnchorMonthYear(baseMs, d.getFullYear() + direction, d.getMonth());
+  }
+  return baseMs;
 }
 
 function parseTimestamp(value) {
@@ -148,87 +204,116 @@ function parseTimestamp(value) {
 }
 
 const DAY_NAMES = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-
-function formatTimeHHMM(ms) {
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
 
 /**
- * Menghitung data grafik statistik secara realtime berdasarkan rentang waktu:
- * '30m' (per 30 menit), '1h' (per 1 jam), '1d' (per hari), '1mo' (per bulan)
+ * Menghitung data grafik statistik secara realtime berdasarkan rentang waktu & acuan tanggal:
+ * 'today' (Hari Ini - pembagian waktu 24 jam pada tanggal acuan),
+ * '1d' (Per Hari - 7 hari),
+ * '1w' (Per Minggu dalam bulan terpilih),
+ * '1mo' (Per Bulan Jan–Des dalam tahun terpilih),
+ * '1y' (Per Tahun)
  */
-export function buildRealtimeStats(reports = [], timeframe = '1d', nowMs = Date.now(), officerUsername = null) {
+export function buildRealtimeStats(
+  reports = [],
+  timeframe = 'today',
+  anchorMs = Date.now(),
+  officerUsername = null
+) {
   const scoped = officerUsername
     ? reports.filter((r) => getReportOfficerUsernames(r).includes(officerUsername))
     : reports;
 
-  const now = new Date(nowMs);
+  const refDate = new Date(anchorMs);
+  const year = refDate.getFullYear();
+  const month = refDate.getMonth();
+  const date = refDate.getDate();
   const buckets = [];
+  let periodSummary = '';
 
-  if (timeframe === '30m') {
-    const stepMs = 30 * 60 * 1000;
-    const currentBucketStart = Math.floor(nowMs / stepMs) * stepMs;
-    for (let i = 6; i >= 0; i--) {
-      const start = currentBucketStart - i * stepMs;
-      const end = start + stepMs;
+  if (timeframe === 'today') {
+    // 6 slot waktu (masing-masing 4 jam) sepanjang 1 hari penuh (00:00 - 24:00)
+    for (let h = 0; h < 24; h += 4) {
+      const start = new Date(year, month, date, h, 0, 0, 0).getTime();
+      const end = new Date(year, month, date, h + 4, 0, 0, 0).getTime();
+      const startStr = `${String(h).padStart(2, '0')}:00`;
+      const endStr = `${String(h + 4).padStart(2, '0')}:00`;
       buckets.push({
-        label: formatTimeHHMM(start),
-        fullLabel: `${formatTimeHHMM(start)} - ${formatTimeHHMM(end)}`,
+        label: startStr,
+        fullLabel: `${DAY_NAMES[refDate.getDay()]}, ${date} ${MONTH_OPTIONS[month].short} (${startStr}–${endStr})`,
         start,
         end,
         masuk: 0,
         selesai: 0,
       });
     }
-  } else if (timeframe === '1h') {
-    const stepMs = 60 * 60 * 1000;
-    const currentBucketStart = Math.floor(nowMs / stepMs) * stepMs;
-    for (let i = 6; i >= 0; i--) {
-      const start = currentBucketStart - i * stepMs;
-      const end = start + stepMs;
+    periodSummary = `${DAY_NAMES[refDate.getDay()]}, ${date} ${MONTH_OPTIONS[month].full} ${year} (00:00–24:00)`;
+  } else if (timeframe === '1w') {
+    // Per Minggu di Bulan & Tahun terpilih (Minggu 1 s/d Minggu 4/5)
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    let weekNum = 1;
+    for (let startDay = 1; startDay <= daysInMonth; startDay += 7) {
+      const endDay = Math.min(startDay + 6, daysInMonth);
+      const start = new Date(year, month, startDay, 0, 0, 0).getTime();
+      const end = new Date(year, month, endDay + 1, 0, 0, 0).getTime();
       buckets.push({
-        label: formatTimeHHMM(start),
-        fullLabel: `${formatTimeHHMM(start)} - ${formatTimeHHMM(end)}`,
+        label: `Mgg ${weekNum}`,
+        fullLabel: `Minggu ${weekNum} (${startDay}–${endDay} ${MONTH_OPTIONS[month].short} ${year})`,
         start,
         end,
         masuk: 0,
         selesai: 0,
       });
+      weekNum += 1;
     }
+    periodSummary = `${MONTH_OPTIONS[month].full} ${year} (${buckets.length} Minggu)`;
   } else if (timeframe === '1mo') {
-    for (let i = 6; i >= 0; i--) {
-      const startDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+    // Per Bulan (Jan - Des) pada Tahun terpilih
+    for (let m = 0; m < 12; m++) {
+      const start = new Date(year, m, 1, 0, 0, 0).getTime();
+      const end = new Date(year, m + 1, 1, 0, 0, 0).getTime();
       buckets.push({
-        label: MONTH_NAMES[startDate.getMonth()],
-        fullLabel: `${MONTH_NAMES[startDate.getMonth()]} ${startDate.getFullYear()}`,
-        start: startDate.getTime(),
-        end: endDate.getTime(),
+        label: MONTH_OPTIONS[m].short,
+        fullLabel: `${MONTH_OPTIONS[m].full} ${year}`,
+        start,
+        end,
         masuk: 0,
         selesai: 0,
       });
     }
+    periodSummary = `Tahun ${year} (Januari – Desember)`;
+  } else if (timeframe === '1y') {
+    // Per Tahun (5 tahun sekitar tahun terpilih)
+    for (let y = year - 3; y <= year + 1; y++) {
+      const start = new Date(y, 0, 1, 0, 0, 0).getTime();
+      const end = new Date(y + 1, 0, 1, 0, 0, 0).getTime();
+      buckets.push({
+        label: String(y),
+        fullLabel: `Tahun ${y}`,
+        start,
+        end,
+        masuk: 0,
+        selesai: 0,
+      });
+    }
+    periodSummary = `Rentang Tahun ${year - 3} – ${year + 1}`;
   } else {
-    // Default: '1d' (Per Hari - 7 hari terakhir)
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    // '1d' (Per Hari - 7 hari berakhir pada tanggal acuan)
+    const dayStart = new Date(year, month, date).getTime();
     const dayMs = 24 * 60 * 60 * 1000;
     for (let i = 6; i >= 0; i--) {
-      const start = todayStart - i * dayMs;
+      const start = dayStart - i * dayMs;
       const end = start + dayMs;
       const d = new Date(start);
       buckets.push({
-        label: DAY_NAMES[d.getDay()],
-        fullLabel: `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`,
+        label: `${DAY_NAMES[d.getDay()]} ${d.getDate()}`,
+        fullLabel: `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_OPTIONS[d.getMonth()].short} ${d.getFullYear()}`,
         start,
         end,
         masuk: 0,
         selesai: 0,
       });
     }
+    periodSummary = `${buckets[0].fullLabel.split(', ')[1]} – ${buckets[6].fullLabel.split(', ')[1]}`;
   }
 
   scoped.forEach((rep) => {
@@ -257,5 +342,5 @@ export function buildRealtimeStats(reports = [], timeframe = '1d', nowMs = Date.
     selesaiHeight: b.selesai === 0 ? 8 : Math.max(18, Math.round((b.selesai / maxCount) * 100)),
   }));
 
-  return { items, totalMasuk, totalSelesai };
+  return { items, totalMasuk, totalSelesai, periodSummary };
 }
