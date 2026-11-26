@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -17,21 +17,27 @@ import {
   Phone,
   Users,
 } from 'lucide-react';
-import { getReportOfficerUsernames } from '../../data/adminMockData';
+import { buildRealtimeStats, getReportOfficerUsernames } from '../../data/adminMockData';
 
-const OFFICER_WEEKLY_STATS = [
-  { day: 'Sen', selesai: 65 },
-  { day: 'Sel', selesai: 80 },
-  { day: 'Rab', selesai: 50 },
-  { day: 'Kam', selesai: 92 },
-  { day: 'Jum', selesai: 75 },
-  { day: 'Sab', selesai: 88 },
-  { day: 'Min', selesai: 60 },
+const TIMEFRAME_OPTIONS = [
+  { id: '30m', label: '30 Menit' },
+  { id: '1h', label: '1 Jam' },
+  { id: '1d', label: 'Per Hari' },
+  { id: '1mo', label: 'Per Bulan' },
 ];
 
 export default function OfficerDashboard({ user, users = [], reports, setReports, onLogout }) {
   const [menu, setMenu] = useState('dashboard');
   const [darkMode, setDarkMode] = useState(false);
+  const [chartTimeframe, setChartTimeframe] = useState('1d');
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTick(Date.now());
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const topTabs = [
     { id: 'dashboard', label: 'Overview' },
@@ -47,7 +53,6 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
     { id: 'profil', label: 'Profil', icon: User },
   ];
 
-  // Semua tugas yang ditugaskan ke petugas ini (bisa banyak tugas sekaligus)
   const myTasks = reports.filter((r) =>
     getReportOfficerUsernames(r).includes(user.username)
   );
@@ -56,14 +61,33 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
   const inProgressTasks = myTasks.filter((r) => r.status === 'Dalam Penanganan');
   const doneTasks = myTasks.filter((r) => r.status === 'Laporan Selesai');
 
+  const officerRealtimeStats = buildRealtimeStats(reports, chartTimeframe, nowTick, user.username);
+  const liveClockLabel = new Date(nowTick).toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
   const completionPercent =
     myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 100;
 
   const updateTaskStatus = (id, status) => {
-    setReports((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    const nowIso = new Date().toISOString();
+    setReports((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status,
+              updatedAt: nowIso,
+              ...(status === 'Laporan Selesai' ? { completedAt: nowIso } : {}),
+            }
+          : r
+      )
+    );
+    setNowTick(Date.now());
   };
 
-  // Menampilkan rekan petugas lain jika 1 laporan ditangani bersama-sama
   const getCoWorkers = (report) => {
     const allAssigned = getReportOfficerUsernames(report).filter(
       (uname) => uname !== user.username
@@ -347,31 +371,65 @@ export default function OfficerDashboard({ user, users = [], reports, setReports
                   </div>
                 </div>
 
-                {/* Kolom Kanan: Grafik Kinerja Mingguan */}
+                {/* Kolom Kanan: Grafik Kinerja Realtime */}
                 <div className={`lg:col-span-4 rounded-[28px] border p-6 flex flex-col justify-between ${cardBg}`}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-sm font-extrabold">Performa Lapangan</h3>
-                      <p className={`text-[11px] mt-0.5 ${mutedText}`}>
-                        Kecepatan respon penanganan minggu ini
-                      </p>
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-extrabold">Performa Lapangan</h3>
+                        <p className={`text-[11px] mt-0.5 ${mutedText}`}>
+                          Tugas diterima & diselesaikan
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-500 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                        Live {liveClockLabel.slice(0, 5)}
+                      </span>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-[11px] font-bold border ${subCardBg}`}>
-                      Aktif
-                    </span>
+
+                    <div className={`grid grid-cols-4 gap-1 p-1 rounded-full border ${subCardBg}`}>
+                      {TIMEFRAME_OPTIONS.map((opt) => {
+                        const active = chartTimeframe === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setChartTimeframe(opt.id);
+                              setNowTick(Date.now());
+                            }}
+                            className={`py-1 px-2 rounded-full text-[10px] font-extrabold transition cursor-pointer ${
+                              active
+                                ? 'bento-blue-3d text-white shadow-xs'
+                                : `${mutedText} hover:text-blue-600`
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-7 gap-2.5 items-end h-44 pt-6">
-                    {OFFICER_WEEKLY_STATS.map((item) => (
-                      <div key={item.day} className="flex flex-col items-center gap-2 h-full justify-end group">
-                        <div className="w-full flex items-end justify-center h-32">
+                  <div className="grid grid-cols-7 gap-2 items-end h-40 pt-5">
+                    {officerRealtimeStats.items.map((item) => (
+                      <div
+                        key={item.fullLabel}
+                        className="flex flex-col items-center gap-1.5 h-full justify-end group"
+                        title={`${item.fullLabel} • Tugas: ${item.masuk}, Selesai: ${item.selesai}`}
+                      >
+                        <span className="text-[9px] font-extrabold text-blue-600 opacity-80 group-hover:opacity-100">
+                          {item.selesai}
+                        </span>
+                        <div className="w-full flex items-end justify-center h-24">
                           <div
-                            style={{ height: `${item.selesai}%` }}
-                            className="w-3.5 rounded-full bento-blue-3d transition-all duration-300 group-hover:scale-y-105"
-                            title={`${item.day}: ${item.selesai}% target`}
+                            style={{ height: `${item.selesaiHeight}%` }}
+                            className={`w-3.5 rounded-full transition-all duration-500 group-hover:scale-y-105 ${
+                              item.selesai > 0 ? 'bento-blue-3d' : 'bg-blue-600/20'
+                            }`}
                           />
                         </div>
-                        <span className={`text-[11px] font-bold ${mutedText}`}>{item.day}</span>
+                        <span className={`text-[10px] font-bold ${mutedText}`}>{item.label}</span>
                       </div>
                     ))}
                   </div>

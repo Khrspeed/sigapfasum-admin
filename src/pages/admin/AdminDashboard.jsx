@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   FileText,
@@ -31,17 +31,15 @@ import {
 import {
   INITIAL_ADMIN_REPORTS,
   USERS_DB,
+  buildRealtimeStats,
   getReportOfficerUsernames,
 } from '../../data/adminMockData';
 
-const WEEKLY_CHART = [
-  { day: 'Sen', total: 42, selesai: 30 },
-  { day: 'Sel', total: 68, selesai: 52 },
-  { day: 'Rab', total: 55, selesai: 44 },
-  { day: 'Kam', total: 86, selesai: 70 },
-  { day: 'Jum', total: 62, selesai: 48 },
-  { day: 'Sab', total: 74, selesai: 60 },
-  { day: 'Min', total: 48, selesai: 39 },
+const TIMEFRAME_OPTIONS = [
+  { id: '30m', label: '30 Menit' },
+  { id: '1h', label: '1 Jam' },
+  { id: '1d', label: 'Per Hari' },
+  { id: '1mo', label: 'Per Bulan' },
 ];
 
 export default function AdminDashboard({
@@ -56,6 +54,10 @@ export default function AdminDashboard({
   const [statusFilter, setStatusFilter] = useState('semua');
   const [search, setSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
+
+  // State Statistik Realtime
+  const [chartTimeframe, setChartTimeframe] = useState('1d');
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   // Modal Penugasan Multi-Petugas pada 1 Laporan
   const [selectedReport, setSelectedReport] = useState(null);
@@ -87,8 +89,21 @@ export default function AdminDashboard({
 
   const fileInputRef = useRef(null);
 
-  // Daftar dinamis petugas (bisa bertambah / berkurang)
+  // Detak waktu realtime setiap 15 detik agar slot 30 menit / 1 jam selalu ter-update
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTick(Date.now());
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
   const officers = users.filter((u) => u.role === 'officer');
+  const realtimeStats = buildRealtimeStats(reports, chartTimeframe, nowTick);
+  const liveClockLabel = new Date(nowTick).toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 
   const topTabs = [
     { id: 'dashboard', label: 'Overview' },
@@ -115,7 +130,6 @@ export default function AdminDashboard({
 
   const completionPercent = stats.total > 0 ? Math.round((stats.selesai / stats.total) * 100) : 0;
 
-  // Helper menampilkan nama semua petugas yang bertugas di suatu laporan
   const formatAssignedNames = (report) => {
     const usernames = getReportOfficerUsernames(report);
     if (usernames.length === 0) return null;
@@ -125,7 +139,6 @@ export default function AdminDashboard({
     });
   };
 
-  // Buka modal kelola laporan (mendukung pilih banyak petugas sekaligus)
   const openManageReportModal = (report) => {
     setSelectedReport(report);
     setSelectedOfficerUsernames(getReportOfficerUsernames(report));
@@ -145,6 +158,7 @@ export default function AdminDashboard({
         return {
           ...r,
           assignedOfficers: selectedOfficerUsernames,
+          updatedAt: new Date().toISOString(),
           status: hasOfficers
             ? r.status === 'Menunggu Verifikasi' || r.status === 'Ditolak'
               ? 'Ditugaskan'
@@ -153,19 +167,22 @@ export default function AdminDashboard({
         };
       })
     );
+    setNowTick(Date.now());
     setSelectedReport(null);
   };
 
   const handleReject = (reportId) => {
     setReports((prev) =>
       prev.map((r) =>
-        r.id === reportId ? { ...r, status: 'Ditolak', assignedOfficers: [] } : r
+        r.id === reportId
+          ? { ...r, status: 'Ditolak', assignedOfficers: [], updatedAt: new Date().toISOString() }
+          : r
       )
     );
+    setNowTick(Date.now());
     setSelectedReport(null);
   };
 
-  // Tambah Petugas Baru
   const handleAddOfficer = (e) => {
     e.preventDefault();
     const cleanUsername = newOfficer.username.trim().toLowerCase();
@@ -196,7 +213,6 @@ export default function AdminDashboard({
     setIsAddOfficerOpen(false);
   };
 
-  // Kurangi / Hapus Petugas
   const handleDeleteOfficer = (officerToRemove) => {
     if (
       !window.confirm(
@@ -216,7 +232,6 @@ export default function AdminDashboard({
     );
   };
 
-  // Buka Modal Tambah Banyak Tugas Bebas ke 1 Petugas
   const openAssignTasksToOfficer = (officer) => {
     setAssignToOfficerTarget(officer);
     const currentAssignedReportIds = reports
@@ -245,6 +260,7 @@ export default function AdminDashboard({
           return {
             ...r,
             assignedOfficers: updatedList,
+            updatedAt: new Date().toISOString(),
             status:
               r.status === 'Menunggu Verifikasi' || r.status === 'Ditolak'
                 ? 'Ditugaskan'
@@ -257,6 +273,7 @@ export default function AdminDashboard({
           return {
             ...r,
             assignedOfficers: updatedList,
+            updatedAt: new Date().toISOString(),
           };
         }
 
@@ -264,10 +281,10 @@ export default function AdminDashboard({
       })
     );
 
+    setNowTick(Date.now());
     setAssignToOfficerTarget(null);
   };
 
-  // Backup JSON (menyertakan data laporan + daftar petugas)
   const handleDownloadJsonBackup = () => {
     const payload = {
       app: 'SigapFasum Kabupaten Kudus',
@@ -291,7 +308,6 @@ export default function AdminDashboard({
     });
   };
 
-  // Ekspor CSV Excel
   const handleExportCsv = () => {
     const headers = [
       'ID Tiket',
@@ -301,7 +317,7 @@ export default function AdminDashboard({
       'Status',
       'Petugas Ditugaskan',
       'Pelapor',
-      'Tanggal',
+      'Waktu Masuk',
       'Link Google Maps',
     ];
     const escapeCsv = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
@@ -333,7 +349,6 @@ export default function AdminDashboard({
     });
   };
 
-  // Restore JSON
   const handleRestoreJson = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -349,6 +364,7 @@ export default function AdminDashboard({
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
           setUsers(parsed.users);
         }
+        setNowTick(Date.now());
         setBackupNotice({
           type: 'success',
           text: `Data berhasil dipulihkan! Sebanyak ${restoredList.length} laporan dimuat kembali.`,
@@ -365,11 +381,11 @@ export default function AdminDashboard({
     reader.readAsText(file);
   };
 
-  // Reset Data
   const handleResetDefault = () => {
     if (!window.confirm('Kembalikan data laporan dan daftar petugas ke pengaturan awal?')) return;
     setReports(INITIAL_ADMIN_REPORTS);
     setUsers(USERS_DB);
+    setNowTick(Date.now());
     setBackupNotice({ type: 'success', text: 'Data laporan dan daftar petugas berhasil direset.' });
   };
 
@@ -682,47 +698,99 @@ export default function AdminDashboard({
                   </div>
                 </div>
 
-                {/* Kolom Kanan: Grafik Batang Mingguan */}
+                {/* Kolom Kanan: Grafik Statistik Realtime */}
                 <div className={`lg:col-span-4 rounded-[28px] border p-6 flex flex-col justify-between ${cardBg}`}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-sm font-extrabold">Statistik Penanganan</h3>
-                      <p className={`text-[11px] mt-0.5 ${mutedText}`}>
-                        Perbandingan laporan masuk & selesai
-                      </p>
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-extrabold">Statistik Penanganan</h3>
+                        <p className={`text-[11px] mt-0.5 ${mutedText}`}>
+                          Perbandingan laporan masuk & selesai
+                        </p>
+                      </div>
+                      <span
+                        title={`Terakhir diperbarui: ${liveClockLabel}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-500 shrink-0"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                        Live {liveClockLabel.slice(0, 5)}
+                      </span>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-[11px] font-bold border ${subCardBg}`}>
-                      Minggu Ini
-                    </span>
+
+                    {/* Pilihan Interval Waktu Realtime */}
+                    <div className={`grid grid-cols-4 gap-1 p-1 rounded-full border ${subCardBg}`}>
+                      {TIMEFRAME_OPTIONS.map((opt) => {
+                        const active = chartTimeframe === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setChartTimeframe(opt.id);
+                              setNowTick(Date.now());
+                            }}
+                            className={`py-1 px-2 rounded-full text-[10px] font-extrabold transition cursor-pointer ${
+                              active
+                                ? 'bento-blue-3d text-white shadow-xs'
+                                : `${mutedText} hover:text-blue-600`
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] font-bold pt-0.5">
+                      <div className="flex items-center gap-3">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                          Masuk ({realtimeStats.totalMasuk})
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className={`w-2.5 h-2.5 rounded-full ${
+                              darkMode ? 'bg-slate-400' : 'bg-slate-800'
+                            }`}
+                          />
+                          Selesai ({realtimeStats.totalSelesai})
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-4 text-[11px] font-bold mt-4">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-blue-600" /> Laporan Masuk
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className={`w-2.5 h-2.5 rounded-full ${darkMode ? 'bg-slate-400' : 'bg-slate-800'}`} /> Selesai
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-2.5 items-end h-40 pt-6">
-                    {WEEKLY_CHART.map((item) => (
-                      <div key={item.day} className="flex flex-col items-center gap-2 h-full justify-end group">
-                        <div className="w-full flex items-end justify-center gap-1 h-28">
+                  {/* Batang Grafik Realtime */}
+                  <div className="grid grid-cols-7 gap-2 items-end h-40 pt-5">
+                    {realtimeStats.items.map((item) => (
+                      <div
+                        key={item.fullLabel}
+                        className="flex flex-col items-center gap-1.5 h-full justify-end group relative"
+                        title={`${item.fullLabel} • Masuk: ${item.masuk}, Selesai: ${item.selesai}`}
+                      >
+                        <span className="text-[9px] font-extrabold text-blue-600 opacity-80 group-hover:opacity-100">
+                          {item.masuk}/{item.selesai}
+                        </span>
+                        <div className="w-full flex items-end justify-center gap-1 h-24">
                           <div
-                            style={{ height: `${item.total}%` }}
-                            className="w-2.5 rounded-full bento-blue-3d transition-all duration-300 group-hover:scale-y-105"
-                            title={`${item.day}: ${item.total} masuk`}
+                            style={{ height: `${item.masukHeight}%` }}
+                            className={`w-2.5 rounded-full transition-all duration-500 group-hover:scale-y-105 ${
+                              item.masuk > 0 ? 'bento-blue-3d' : 'bg-blue-600/20'
+                            }`}
                           />
                           <div
-                            style={{ height: `${item.selesai}%` }}
-                            className={`w-2.5 rounded-full transition-all duration-300 ${
-                              darkMode ? 'bg-slate-500' : 'bg-[#0f172a]'
+                            style={{ height: `${item.selesaiHeight}%` }}
+                            className={`w-2.5 rounded-full transition-all duration-500 ${
+                              item.selesai > 0
+                                ? darkMode
+                                  ? 'bg-slate-400'
+                                  : 'bg-[#0f172a]'
+                                : darkMode
+                                ? 'bg-slate-700/60'
+                                : 'bg-slate-300/60'
                             }`}
-                            title={`${item.day}: ${item.selesai} selesai`}
                           />
                         </div>
-                        <span className={`text-[11px] font-bold ${mutedText}`}>{item.day}</span>
+                        <span className={`text-[10px] font-bold ${mutedText}`}>{item.label}</span>
                       </div>
                     ))}
                   </div>
@@ -1041,7 +1109,7 @@ export default function AdminDashboard({
             </div>
           )}
 
-          {/* VIEW 4: KELOLA PETUGAS (TAMBAH, HAPUS & ATUR BANYAK TUGAS) */}
+          {/* VIEW 4: KELOLA PETUGAS */}
           {menu === 'petugas' && (
             <div className="space-y-5">
               <div className="bento-blue-3d rounded-[28px] p-6 sm:p-8 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative overflow-hidden">
@@ -1116,7 +1184,6 @@ export default function AdminDashboard({
                             <p className={`text-xs mt-0.5 ${mutedText}`}>{off.unit}</p>
                           </div>
 
-                          {/* Daftar Tugas yang Dipegang Petugas Ini */}
                           <div className={`p-3 rounded-2xl border space-y-1.5 ${subCardBg}`}>
                             <p className="text-[11px] font-extrabold text-blue-600">
                               Daftar Tugas ({officerReports.length}):

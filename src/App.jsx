@@ -36,6 +36,24 @@ export default function App() {
     localStorage.setItem(REPORTS_STORAGE_KEY, JSON.stringify(reports));
   }, [reports]);
 
+  // Sinkronisasi realtime jika data berubah dari tab lain
+  useEffect(() => {
+    const handleStorageSync = (e) => {
+      if (e.key === REPORTS_STORAGE_KEY && e.newValue) {
+        try {
+          setReports(JSON.parse(e.newValue));
+        } catch {}
+      }
+      if (e.key === USERS_STORAGE_KEY && e.newValue) {
+        try {
+          setUsers(JSON.parse(e.newValue));
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageSync);
+    return () => window.removeEventListener('storage', handleStorageSync);
+  }, []);
+
   if (!currentUser) {
     return <LoginPage users={users} onLogin={setCurrentUser} />;
   }
